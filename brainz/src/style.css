@@ -28,6 +28,7 @@ button svg { width:19px; height:19px; flex:none; }
 .save-state.saving { color:#c4b781; }.save-state.saving i { background:#d9bf69; animation:breathe 1s ease-in-out infinite; }.save-state.failed { color:#efaa94; }
 .text-button { display:flex; align-items:center; justify-content:center; gap:7px; padding:8px 10px; border-radius:8px; font-size:12px; line-height:18px; white-space:nowrap; transition:background .13s,color .13s; }
 .text-button:hover { background:#33332b; }.text-button svg { width:16px; height:16px; }.share { background:#e2c76b; color:#24231b; font-weight:550; }.share:hover { background:#efd582; }
+#copy-view { min-width:104px; }.share.copied { background:#a1c181; color:#24231b; }
 #canvas { position:absolute; inset:55px 0 0; overflow:hidden; background:#141413; }
 edgeless-editor { display:block; width:100%; height:100%; }
 edgeless-toolbar-widget,affine-edgeless-zoom-toolbar-widget { display:none!important; }

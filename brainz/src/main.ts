@@ -37,6 +37,7 @@ const paths: Record<string, string> = {
   connector: 'M4 18V8a2 2 0 0 1 2-2h14M16 2l4 4-4 4M2 18h4v4H2Z',
   text: 'M4 5V3h16v2M12 3v18M8 21h8',
   pen: 'M4 20l4-1L20 7a2 2 0 0 0-3-3L5 16l-1 4ZM14 7l3 3',
+  check: 'M5 12l4 4L19 6',
   link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
   file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6M8 13h8M8 17h5',
   undo: 'M3 9h12a6 6 0 0 1 0 12M3 9l5-5M3 9l5 5',
@@ -48,7 +49,7 @@ const paths: Record<string, string> = {
 const icon = (name: string) => name === 'fit' ? expandIcon : name === 'collapse' ? collapseIcon : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]}"/></svg>`;
 const tool = (name: string, label: string, shortcut: string) => `<button class="tool" data-tool="${name}" aria-label="${label}" aria-pressed="false" title="${label} (${shortcut})">${icon(name)}<span class="tooltip">${label}<kbd>${shortcut}</kbd></span></button>`;
 app.innerHTML = `
-<header class="topbar"><div class="board-name">${icon('canvas')}<input id="title" aria-label="Board name" value="Untitled canvas" maxlength="120"><span class="save-state" id="save-state" role="status"><i></i>Opening…</span></div><div class="header-actions"><button id="use-chat" class="text-button" title="Attach objects, connections, and an image to your current Claude or Codex chat">${icon('canvas')}Use in chat</button><button id="add-file" class="text-button">${icon('file')}Add file</button><button id="copy-view" class="text-button share">${icon('link')}Copy view link</button></div></header>
+<header class="topbar"><div class="board-name">${icon('canvas')}<input id="title" aria-label="Board name" value="Untitled canvas" maxlength="120"><span class="save-state" id="save-state" role="status"><i></i>Opening…</span></div><div class="header-actions"><button id="add-file" class="text-button">${icon('file')}Add file</button><button id="copy-view" class="text-button share">${icon('link')}Copy link</button></div></header>
 <main id="canvas" aria-label="Infinite whiteboard"></main>
 <div class="empty-state" id="empty"><div class="empty-symbol">${icon('canvas')}</div><h1>A little room to think.</h1><p>Map an idea. Connect the dots.<br>Bring your notes into the picture.</p><button id="first-note" class="primary">${icon('plus')}Add your first note</button><span>or drop a file anywhere</span></div>
 <nav class="tools" aria-label="Drawing tools">${tool('pointer','Select','V')}${tool('hand','Pan','H')}<div class="rule"></div>${tool('note','Sticky note','N')}${tool('box','Box','R')}${tool('connector','Connector','C')}${tool('text','Text','T')}${tool('pen','Draw','P')}<div class="rule"></div><button id="add-link" class="tool" aria-label="Add link" title="Add a Brainz, My Man, or web link">${icon('link')}</button><div class="rule"></div><button id="capture" class="tool" aria-label="Capture area" aria-pressed="false" title="Drag an area to copy as an image">${icon('capture')}<span class="tooltip">Capture area</span></button></nav>
@@ -78,9 +79,19 @@ let viewportTimer: ReturnType<typeof setTimeout> | undefined;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let loading = true;
 let attachAfterLoad = false;
+let attaching = false;
+let awaitingLinkCopy = false;
+let copyFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
 let previousViewport: [number,number,number] | undefined;
 
 function notice(message: string) {
+  if (message === 'Link copied' && awaitingLinkCopy) {
+    awaitingLinkCopy = false;
+    const button = get('copy-view');
+    button.innerHTML = `${icon('check')}Copied`; button.classList.add('copied');
+    clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(() => { button.innerHTML = `${icon('link')}Copy link`; button.classList.remove('copied'); }, 2200);
+  }
   const toast = get('toast'); toast.textContent = message; toast.hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 3400);
 }
@@ -162,11 +173,9 @@ async function addFile(reference: LinkReference, position: [number,number]) {
   selectTool('pointer'); save(); updateEmpty();
 }
 
-async function useInChat() {
-  if (!service) return;
-  const button = get<HTMLButtonElement>('use-chat');
-  if (button.disabled) return;
-  button.disabled = true;
+async function attachToChat() {
+  if (!service || attaching) return;
+  attaching = true;
   notice('Preparing canvas context…');
   try {
     const bounds = getCommonBound(service.edgelessElements.map(element=>element.elementBound));
@@ -186,7 +195,7 @@ async function useInChat() {
     save();
     post({type:'attachToChat',scene:describeScene(service,links,target,title.value),png,preview});
   } catch(error) { console.error(error); notice(`Could not attach canvas: ${error instanceof Error ? error.message : String(error)}`); }
-  finally { button.disabled = false; }
+  finally { attaching = false; }
 }
 function updateSelection() {
   const ids = service.selection.selectedIds;
@@ -274,7 +283,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   loading = false; selectTool('pointer'); updateEmpty();
   saveState.className = 'save-state'; saveState.innerHTML = '<i></i>Saved locally';
   if (next.object || next.viewport) focusTarget(next);
-  if (attachAfterLoad) { attachAfterLoad = false; void useInChat(); }
+  if (attachAfterLoad) { attachAfterLoad = false; void attachToChat(); }
   if (!document || migratedFont) save();
   editor.addEventListener('dblclick',event => {
     const id = service.selection.selectedIds[0];
@@ -291,7 +300,7 @@ async function receive(message: Record<string,unknown>) {
     case 'load': try { attachAfterLoad ||= Boolean(message.attach); await load(message.document as BoardDocument|null,message.target as BoardTarget); } catch (error) { console.error(error); const text=String(error); notice(text); post({type:'error',message:text}); } break;
     case 'focus': if (!loading) focusTarget(message.target as BoardTarget); break;
     case 'relocated': target = message.target as BoardTarget; save(); notice('Canvas moved'); break;
-    case 'attach': if (loading) attachAfterLoad = true; else void useInChat(); break;
+    case 'attach': if (loading) attachAfterLoad = true; else void attachToChat(); break;
     case 'saved': savedRevision = Math.max(savedRevision,Number(message.revision)); if (savedRevision >= revision && !saveTimer) { saveState.className='save-state'; saveState.innerHTML='<i></i>Saved locally'; } break;
     case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
     case 'notice': notice(String(message.message)); break;
@@ -326,11 +335,14 @@ get('fit').onclick = () => {
     get('fit').innerHTML = icon('collapse'); get('fit').setAttribute('aria-label','Restore previous view'); get('fit').title = 'Restore previous view';
   }
 };
-get('copy-view').onclick = () => service && post({type:'copy',text:boardLink(target,viewport())});
+get('copy-view').onclick = () => {
+  if (!service) return;
+  awaitingLinkCopy = true;
+  post({type:'copy',text:boardLink(target,viewport())});
+};
 get('copy-object').onclick = () => { const id=service.selection.selectedIds[0]; if(id) post({type:'copy',text:boardLink(target,viewport(),id)}); };
 get('open-object').onclick = () => { const reference=links.get(service.selection.selectedIds[0]); if(reference) post({type:'open',url:reference.url}); };
 get('add-file').onclick = () => post({type:'pickFiles'});
-get('use-chat').onclick = () => { void useInChat(); };
 for (const [id, type] of [['new-canvas','newCanvas'],['move-canvas','moveCanvas']]) {
   get(id).onclick = () => { get<HTMLDetailsElement>('canvas-menu').open = false; save(); post({type}); };
 }

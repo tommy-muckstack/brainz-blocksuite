@@ -121,7 +121,7 @@ test('transparent fill removes the background and survives reopening',async({pag
   await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
   await expect.poll(fill).toEqual({filled:false,fillColor:'--affine-palette-transparent'});
   await expect.poll(async()=>(await colorCounts(page,[[500,420]],[20,20,19]))[0]).toBeGreaterThan(150);
-  await page.getByRole('button',{name:'Use in chat',exact:true}).click();
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'attach'}})));
   await expect.poll(()=>page.evaluate(()=>window.__messages.some(message=>message.type==='attachToChat'))).toBe(true);
   const center=await page.evaluate(async()=>{
     const {png}=window.__messages.find(message=>message.type==='attachToChat');
@@ -174,7 +174,7 @@ test('filing a canvas updates its saved context and object links',async({page})=
   await page.getByRole('menuitem',{name:'Move to folder…'}).click();
   expect(await page.evaluate(()=>window.__messages.some(message=>message.type==='moveCanvas'))).toBe(true);
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'relocated',target:{path:'/tmp/Projects/Project map.brainzboard'}}})));
-  await page.getByRole('button',{name:'Copy view link',exact:true}).click();
+  await page.getByRole('button',{name:'Copy link',exact:true}).click();
   const link=await page.evaluate(()=>window.__messages.filter(message=>message.type==='copy').at(-1).text);
   expect(new URL(link).searchParams.get('path')).toBe('/tmp/Projects/Project map.brainzboard');
   await expect(page.locator('#save-state')).toHaveText('Saved locally');
@@ -243,7 +243,7 @@ test('chat context includes explicit arrows, the visual canvas, and images after
   await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
   await expect(page.locator('affine-edgeless-image img')).toBeVisible();
   expect(await page.locator('affine-edgeless-image img').evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBe(160);
-  await page.getByRole('button',{name:'Use in chat',exact:true}).click();
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'attach'}})));
   await expect.poll(()=>page.evaluate(()=>window.__messages.some(message=>message.type==='attachToChat'))).toBe(true);
   const context=await page.evaluate(()=>window.__messages.find(message=>message.type==='attachToChat'));
   const objects=(await state(page)).filter((object:any)=>object.type==='shape');
@@ -381,6 +381,7 @@ test('capture includes sticky-note text and keeps the document unchanged',async(
 
 test('the canvas picker attaches a fresh board after opening and an already open board',async({page})=>{
   await openBoard(page);
+  await expect(page.getByRole('button',{name:'Use in chat',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:'Add your first note'}).click();
   await page.locator('affine-edgeless-note').dblclick({position:{x:50,y:45}});
   await page.keyboard.type('Picker context'); await page.keyboard.press('Escape');
@@ -393,4 +394,21 @@ test('the canvas picker attaches a fresh board after opening and an already open
   expect(Buffer.from(first.png,'base64').subarray(1,4).toString()).toBe('PNG');
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'attach'}})));
   await expect.poll(()=>page.evaluate(()=>window.__messages.filter(message=>message.type==='attachToChat').length)).toBe(2);
+});
+
+test('Copy link confirms clipboard success briefly in the toolbar',async({page})=>{
+  await openBoard(page);
+  const button=page.getByRole('button',{name:'Copy link',exact:true});
+  const width=await button.evaluate(element=>element.getBoundingClientRect().width);
+  await button.click();
+  await expect(button).toHaveText('Copy link');
+  const link=await page.evaluate(()=>window.__messages.filter(message=>message.type==='copy').at(-1).text);
+  expect(new URL(link).searchParams.get('path')).toBe('/tmp/Brainz test.board.brainzboard');
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'notice',message:'Link copied'}})));
+  const copied=page.getByRole('button',{name:'Copied',exact:true});
+  await expect(copied).toHaveClass(/copied/);
+  expect(await copied.evaluate(element=>element.getBoundingClientRect().width)).toBe(width);
+  await expect(page.getByRole('status').filter({hasText:'Link copied'})).toBeVisible();
+  await expect(button).toBeVisible({timeout:4000});
+  await expect(button).not.toHaveClass(/copied/);
 });
