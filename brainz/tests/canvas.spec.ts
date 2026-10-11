@@ -8,7 +8,7 @@ async function openBoard(page: Page) {
     window.__target={path:'/tmp/Brainz test.board.brainzboard'};
     window.ipc={postMessage(value:string){
       const message=JSON.parse(value);window.__messages.push(message);
-      if(message.type==='ready') queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'load',document:JSON.parse(localStorage.getItem('test-board') || 'null'),target:window.__target}})));
+      if(message.type==='ready') queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'load',document:JSON.parse(localStorage.getItem('test-board') || 'null'),target:window.__target,attach:localStorage.getItem('test-attach')==='true'}})));
       if(message.type==='save') {localStorage.setItem('test-board',JSON.stringify(message.document));queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'saved',revision:message.revision}})));}
     }};
   });
@@ -214,4 +214,21 @@ test('capture includes sticky-note text and keeps the document unchanged',async(
   await writeFile(test.info().outputPath('sticky-capture.png'),Buffer.from(png,'base64'));
   await test.info().attach('Sticky note capture',{body:Buffer.from(png,'base64'),contentType:'image/png'});
   expect(await state(page)).toEqual(before);
+});
+
+
+test('the canvas picker attaches a fresh board after opening and an already open board',async({page})=>{
+  await openBoard(page);
+  await page.getByRole('button',{name:'Add your first note'}).click();
+  await page.locator('affine-edgeless-note').dblclick({position:{x:50,y:45}});
+  await page.keyboard.type('Picker context'); await page.keyboard.press('Escape');
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  await page.evaluate(()=>localStorage.setItem('test-attach','true'));
+  await page.reload();
+  await expect.poll(()=>page.evaluate(()=>window.__messages.filter(message=>message.type==='attachToChat').length)).toBe(1);
+  const first=await page.evaluate(()=>window.__messages.find(message=>message.type==='attachToChat'));
+  expect(first.scene.objects.some((object:any)=>object.text==='Picker context')).toBe(true);
+  expect(Buffer.from(first.png,'base64').subarray(1,4).toString()).toBe('PNG');
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'attach'}})));
+  await expect.poll(()=>page.evaluate(()=>window.__messages.filter(message=>message.type==='attachToChat').length)).toBe(2);
 });

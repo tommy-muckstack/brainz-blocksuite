@@ -73,6 +73,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let viewportTimer: ReturnType<typeof setTimeout> | undefined;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let loading = true;
+let attachAfterLoad = false;
 let previousViewport: [number,number,number] | undefined;
 
 function notice(message: string) {
@@ -158,7 +159,9 @@ async function addFile(reference: LinkReference, position: [number,number]) {
 
 async function useInChat() {
   if (!service) return;
-  const button = get<HTMLButtonElement>('use-chat'); button.disabled = true;
+  const button = get<HTMLButtonElement>('use-chat');
+  if (button.disabled) return;
+  button.disabled = true;
   notice('Preparing canvas context…');
   try {
     const bounds = getCommonBound(service.edgelessElements.map(element=>element.elementBound));
@@ -261,6 +264,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   loading = false; selectTool('pointer'); updateEmpty();
   saveState.className = 'save-state'; saveState.innerHTML = '<i></i>Saved locally';
   if (next.object || next.viewport) focusTarget(next);
+  if (attachAfterLoad) { attachAfterLoad = false; void useInChat(); }
   if (!document || migratedFont) save();
   editor.addEventListener('dblclick',event => {
     const id = service.selection.selectedIds[0];
@@ -273,8 +277,9 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
 function documentButtons() { return document.querySelectorAll<HTMLButtonElement>('[data-tool]'); }
 async function receive(message: Record<string,unknown>) {
   switch (message.type) {
-    case 'load': try { await load(message.document as BoardDocument|null,message.target as BoardTarget); } catch (error) { console.error(error); const text=String(error); notice(text); post({type:'error',message:text}); } break;
-    case 'focus': focusTarget(message.target as BoardTarget); break;
+    case 'load': try { attachAfterLoad ||= Boolean(message.attach); await load(message.document as BoardDocument|null,message.target as BoardTarget); } catch (error) { console.error(error); const text=String(error); notice(text); post({type:'error',message:text}); } break;
+    case 'focus': if (!loading) focusTarget(message.target as BoardTarget); break;
+    case 'attach': if (loading) attachAfterLoad = true; else void useInChat(); break;
     case 'saved': savedRevision = Math.max(savedRevision,Number(message.revision)); if (savedRevision >= revision && !saveTimer) { saveState.className='save-state'; saveState.innerHTML='<i></i>Saved locally'; } break;
     case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
     case 'notice': notice(String(message.message)); break;
