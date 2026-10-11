@@ -21,6 +21,168 @@ async function drawBox(page:Page,from:[number,number],to:[number,number]) {
 }
 const state = (page:Page) => page.evaluate(()=> (window.__brainzBoard as any).service.edgelessElements.map((element:any)=>({id:element.id,type:element.type,xywh:element.xywh,source:element.source,target:element.target})));
 
+async function colorCounts(page:Page, points:number[][], color:number[], radius=7) {
+  const screenshot=(await page.screenshot()).toString('base64');
+  return page.evaluate(async({screenshot,points,color,radius})=>{
+    const image=new Image();image.src=`data:image/png;base64,${screenshot}`;await image.decode();
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d')!;context.drawImage(image,0,0);
+    return points.map(([x,y])=>{
+      const pixels=context.getImageData(Math.round(x)-radius,Math.round(y)-radius,radius*2+1,radius*2+1).data;
+      let count=0;
+      for(let index=0;index<pixels.length;index+=4) if(color.every((value,channel)=>Math.abs(pixels[index+channel]-value)<8))count++;
+      return count;
+    });
+  },{screenshot,points,color,radius});
+}
+
+const objectPorts=(page:Page)=>page.evaluate(()=>{
+  const {service}=window.__brainzBoard as any;
+  const canvas=document.getElementById('canvas')!.getBoundingClientRect();
+  return service.edgelessElements.filter((element:any)=>element.connectable).map((element:any)=>{
+    const [x,y,width,height]=JSON.parse(element.xywh);
+    const angle=(element.rotate||0)*Math.PI/180;
+    const ports=[[0,-height/2],[width/2,0],[0,height/2],[-width/2,0]].map(([dx,dy])=>{
+      const point=service.viewport.toViewCoord(x+width/2+dx*Math.cos(angle)-dy*Math.sin(angle),y+height/2+dx*Math.sin(angle)+dy*Math.cos(angle));
+      return [point[0]+canvas.left,point[1]+canvas.top];
+    });
+    return {id:element.id,ports};
+  });
+});
+
+test('Connector shows object ports immediately and binds arrows at every zoom',async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await openBoard(page);
+  await drawBox(page,[270,230],[460,350]);await drawBox(page,[800,230],[990,350]);
+  await page.getByRole('button',{name:'Sticky note',exact:true}).click();await page.mouse.click(500,510);
+  await page.getByRole('button',{name:'Connector',exact:true}).click();
+  let objects=await objectPorts(page);
+  expect(objects).toHaveLength(3);
+  const amber=[226,199,107];
+  await expect.poll(async()=>(await colorCounts(page,objects.flatMap((object:any)=>object.ports),amber)).every(count=>count>12)).toBe(true);
+  await page.screenshot({path:test.info().outputPath('connector-ports.png')});
+  const [source,target]=objects;
+  await page.mouse.move(source.ports[1][0],source.ports[1][1]);await page.mouse.down();
+  await page.mouse.move(target.ports[3][0],target.ports[3][1],{steps:20});
+  await expect.poll(async()=>(await colorCounts(page,objects[2].ports,amber)).every(count=>count>12)).toBe(true);
+  await page.mouse.up();
+  const connector=(await state(page)).find((element:any)=>element.type==='connector');
+  expect(connector.source).toMatchObject({id:source.id,position:[1,.5]});
+  expect(connector.target).toMatchObject({id:target.id,position:[0,.5]});
+  await expect(page.getByRole('button',{name:'Select',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect.poll(async()=>(await colorCounts(page,objects[2].ports,amber)).every(count=>count===0)).toBe(true);
+
+  await page.evaluate(id=>{
+    const {service}=window.__brainzBoard as any;
+    service.gfx.updateElement(service.gfx.getElementById(id),{rotate:30});
+    service.viewport.setViewport(.65,[service.viewport.centerX+40,service.viewport.centerY-30]);
+  },source.id);
+  await page.getByRole('button',{name:'Connector',exact:true}).click();
+  objects=await objectPorts(page);
+  await page.screenshot({path:test.info().outputPath('rotated-ports.png')});
+  await expect.poll(async()=>(await colorCounts(page,objects.flatMap((object:any)=>object.ports),amber)).every(count=>count>=10)).toBe(true);
+  await page.mouse.move(objects[0].ports[2][0],objects[0].ports[2][1]);await page.mouse.down();
+  await page.mouse.move(objects[2].ports[0][0],objects[2].ports[0][1],{steps:20});await page.mouse.up();
+  const rotatedConnector=(await state(page)).filter((element:any)=>element.type==='connector')[1];
+  expect(rotatedConnector.source.id).toBe(source.id);
+  expect(rotatedConnector.source.position[0]).toBeCloseTo(.5,1);
+  expect(rotatedConnector.source.position[1]).toBeCloseTo(1,1);
+  expect(rotatedConnector.target.id).toBe(objects[2].id);
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  expect((await state(page)).filter((element:any)=>element.type==='connector')).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
+test('transparent fill removes the background and survives reopening',async({page})=>{
+  const errors:string[]=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await openBoard(page);
+  await drawBox(page,[350,300],[630,480]);
+  await page.getByRole('button',{name:'Select',exact:true}).click();
+  await page.mouse.click(450,400);
+  await page.locator('editor-icon-button[aria-label="Fill color"]').click();
+  const palette=page.locator('edgeless-color-panel[aria-label="Fill colors"]');
+  await palette.locator('[aria-label="--affine-palette-shape-green"]').click();
+  const fill=()=>page.evaluate(()=>{
+    const shape=(window.__brainzBoard as any).service.edgelessElements[0];
+    return {filled:shape.filled,fillColor:shape.fillColor};
+  });
+  await expect.poll(fill).toEqual({filled:true,fillColor:'--affine-palette-shape-green'});
+  expect((await colorCounts(page,[[500,420]],[20,20,19]))[0]).toBe(0);
+  await page.locator('editor-icon-button[aria-label="Fill color"]').click();
+  await palette.locator('[aria-label="--affine-palette-transparent"]').click();
+  await expect.poll(fill).toEqual({filled:false,fillColor:'--affine-palette-transparent'});
+  expect(errors).toEqual([]);
+  await page.mouse.click(950,650);
+  await expect.poll(async()=>(await colorCounts(page,[[500,420]],[20,20,19]))[0]).toBeGreaterThan(150);
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  await page.screenshot({path:test.info().outputPath('transparent-fill.png')});
+  await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await expect.poll(fill).toEqual({filled:false,fillColor:'--affine-palette-transparent'});
+  await expect.poll(async()=>(await colorCounts(page,[[500,420]],[20,20,19]))[0]).toBeGreaterThan(150);
+  await page.getByRole('button',{name:'Use in chat',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.__messages.some(message=>message.type==='attachToChat'))).toBe(true);
+  const center=await page.evaluate(async()=>{
+    const {png}=window.__messages.find(message=>message.type==='attachToChat');
+    const image=new Image();image.src=`data:image/png;base64,${png}`;await image.decode();
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d')!;context.drawImage(image,0,0);
+    return [...context.getImageData(image.width/2,image.height/2,1,1).data];
+  });
+  expect(center).toEqual([20,20,19,255]);
+  expect(errors).toEqual([]);
+});
+
+test('Copy PNG exports only selected items with equal padding',async({page})=>{
+  await openBoard(page);
+  await drawBox(page,[300,270],[500,410]);
+  await drawBox(page,[400,300],[460,360]);
+  await page.evaluate(()=>{
+    const {service}=window.__brainzBoard as any;
+    const [selected,other]=service.edgelessElements;
+    service.gfx.updateElement(selected,{fillColor:'#55aaff',strokeColor:'#55aaff',strokeWidth:0,radius:0});
+    service.gfx.updateElement(other,{fillColor:'#ff2200',strokeColor:'#ff2200'});
+    service.selection.set({elements:[selected.id],editing:false});
+  });
+  await page.locator('editor-icon-button[aria-label="Copy PNG"]').click();
+  await expect.poll(()=>page.evaluate(()=>window.__messages.filter(message=>message.type==='copyImage').length)).toBe(1);
+  const capture=await page.evaluate(async()=>{
+    const {png}=window.__messages.find(message=>message.type==='copyImage');
+    const image=new Image();image.src=`data:image/png;base64,${png}`;await image.decode();
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d')!;context.drawImage(image,0,0);
+    const pixels=context.getImageData(0,0,image.width,image.height).data;
+    let left=image.width,top=image.height,right=0,bottom=0,red=0;
+    for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++) {
+      const index=(y*image.width+x)*4;
+      if(pixels[index]===85&&pixels[index+1]===170&&pixels[index+2]===255) {left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
+      if(pixels[index]>240&&pixels[index+1]<60&&pixels[index+2]<10)red++;
+    }
+    return {width:image.width,height:image.height,padding:[left,top,image.width-1-right,image.height-1-bottom],red};
+  });
+  expect(capture).toEqual({width:264,height:204,padding:[32,32,32,32],red:0});
+  expect((await state(page))).toHaveLength(2);
+  const png=await page.evaluate(()=>window.__messages.find(message=>message.type==='copyImage').png);
+  await test.info().attach('Selected objects PNG',{body:Buffer.from(png,'base64'),contentType:'image/png'});
+});
+
+test('filing a canvas updates its saved context and object links',async({page})=>{
+  await openBoard(page);await drawBox(page,[320,240],[520,420]);
+  await page.getByRole('textbox',{name:'Board name'}).fill('Project map');
+  await page.getByLabel('Canvas options',{exact:true}).click();
+  await page.getByRole('menuitem',{name:'Move to folder…'}).click();
+  expect(await page.evaluate(()=>window.__messages.some(message=>message.type==='moveCanvas'))).toBe(true);
+  await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'relocated',target:{path:'/tmp/Projects/Project map.brainzboard'}}})));
+  await page.getByRole('button',{name:'Copy view link',exact:true}).click();
+  const link=await page.evaluate(()=>window.__messages.filter(message=>message.type==='copy').at(-1).text);
+  expect(new URL(link).searchParams.get('path')).toBe('/tmp/Projects/Project map.brainzboard');
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('test-board')!));
+  expect(saved.title).toBe('Project map');
+  expect(JSON.stringify(saved.scene)).toContain('/tmp/Projects/Project map.brainzboard');
+});
+
 test('single clicks keep notes draggable and double click enters text editing',async({page})=>{
   await openBoard(page);
   await page.getByRole('button',{name:'Add your first note'}).click();

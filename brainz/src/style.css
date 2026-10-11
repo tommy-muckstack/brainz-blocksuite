@@ -14,6 +14,13 @@ button svg { width:19px; height:19px; flex:none; }
 .topbar { position:absolute; z-index:10; inset:0 0 auto; height:55px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:0 20px; background:#1d1d1a; border-bottom:1px solid #30302b; user-select:none; }
 .board-name,.header-actions { display:flex; align-items:center; gap:12px; min-width:0; }
 .board-name>svg { width:21px; height:21px; color:#aaa99f; flex:none; }
+.canvas-menu { position:relative; flex:none; margin-left:-10px; }
+.canvas-menu summary { display:grid; place-items:center; width:28px; height:30px; border-radius:7px; cursor:pointer; list-style:none; color:#b5b4a9; }
+.canvas-menu summary::-webkit-details-marker { display:none; }
+.canvas-menu summary:hover,.canvas-menu[open] summary { background:#37372f; }
+.canvas-menu [role=menu] { position:absolute; top:36px; left:0; min-width:185px; padding:5px; background:#282823; border:1px solid #454438; border-radius:10px; box-shadow:0 10px 32px #0006; }
+.canvas-menu button { display:block; width:100%; text-align:left; padding:10px 12px; border-radius:6px; font-size:12px; white-space:nowrap; }
+.canvas-menu button:hover { background:#3a392f; }
 #title { width:clamp(120px,22vw,245px); min-width:80px; border:1px solid transparent; background:transparent; color:#e5e3da; font-weight:550; font-size:14px; padding:7px 6px; border-radius:7px; text-overflow:ellipsis; }
 #title:hover { background:#272722; } #title:focus { background:#272722; border-color:#4e4d3e; outline:none; }
 .save-state { display:flex; align-items:center; gap:6px; color:#93978a; font-size:11px; white-space:nowrap; cursor:pointer; }

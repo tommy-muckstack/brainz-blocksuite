@@ -21,9 +21,17 @@ No canvas content is sent to a server.
 
 Boards use a versioned JSON envelope around a Yjs document. Object IDs, text,
 connector attachments and linked-file metadata survive reopening. The default
-board lives in `.brainz/whiteboard.brainzboard` inside the workspace. Deep links
+board starts in `Canvases/Untitled.brainzboard` in new workspaces; legacy boards
+in `.brainz/whiteboard.brainzboard` still open. The menu beside the name creates
+canvases or moves them into sidebar folders. Native `relocated` messages update
+the file path used by subsequent saves, AI context and copied links. Deep links
 contain that absolute path and an object ID or viewport; they work on a machine
 that has the original board. Linked files remain at their original locations.
+
+Connector mode shows outline attachment points at a constant screen size.
+Copy PNG in the selection toolbar exports selected objects and their descendants
+with even padding, excluding nearby unselected objects. `canvas-overrides.ts`
+adapts the pinned engine's connection overlay and transparent-color style cache.
 
 The integration is licensed under MPL-2.0; see the root LICENSE. Dependency
 licenses remain with their respective packages.

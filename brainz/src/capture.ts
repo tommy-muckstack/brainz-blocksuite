@@ -1,9 +1,44 @@
 import type { EdgelessEditor } from '@blocksuite/presets';
-import { type EdgelessRootService, type EdgelessRootBlockComponent, BlocksUtils } from '@blocksuite/blocks';
+import { type EdgelessRootService, type EdgelessRootBlockComponent, type EdgelessElementToolbarWidget, BlocksUtils } from '@blocksuite/blocks';
 import { ImageBlockModel } from '@blocksuite/affine-model';
-import { Bound, getCommonBound } from '@blocksuite/global/utils';
+import type { GfxModel } from '@blocksuite/block-std/gfx';
+import { Bound, getCommonBound, getCommonBoundWithRotation } from '@blocksuite/global/utils';
+import { html } from 'lit';
 
 type Point = [number, number];
+
+export function installSelectionCapture(editor: EdgelessEditor, service: EdgelessRootService, copy: (png: string) => void, notice: (message: string) => void) {
+  const toolbar = editor.querySelector<EdgelessElementToolbarWidget>('edgeless-element-toolbar-widget');
+  if (!toolbar) throw new Error('Canvas selection toolbar is unavailable.');
+  let busy = false;
+  const capture = async () => {
+    if (busy) return;
+    const selected = new Map<string, GfxModel>();
+    for (const element of service.selection.selectedElements) {
+      selected.set(element.id, element);
+      if ('descendantElements' in element) {
+        for (const child of element.descendantElements as GfxModel[]) selected.set(child.id, child);
+      }
+    }
+    const elements = [...selected.values()];
+    if (!elements.length) return;
+    const bounds = getCommonBoundWithRotation(elements);
+    if (!bounds) return;
+    const padding = 32;
+    const padded = new Bound(bounds.x-padding, bounds.y-padding, bounds.w+padding*2, bounds.h+padding*2);
+    busy = true; toolbar.requestUpdate(); notice('Copying selection…');
+    try { copy(await renderCapture(editor, service, padded, elements)); }
+    catch (error) { console.error(error); notice(`Could not copy selection: ${error instanceof Error ? error.message : String(error)}`); }
+    finally { busy = false; toolbar.requestUpdate(); }
+  };
+  const imageIcon = html`<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 5-5 4 4 4-6 5 7"/></svg>`;
+  toolbar.registerEntry({
+    when: elements => elements.length > 0,
+    render: () => html`<editor-icon-button aria-label="Copy PNG" .tooltip=${'Copy selection as PNG'} .disabled=${busy} @click=${capture}>${imageIcon}</editor-icon-button>`,
+  });
+  toolbar.moreGroups = [{type: 'brainz-export', items: [{type: 'copy-png', label: 'Copy PNG', icon: imageIcon, action: () => { void capture(); }}]}, ...toolbar.moreGroups];
+  toolbar.requestUpdate();
+}
 
 export function installCapture(
   editor: EdgelessEditor,
@@ -92,8 +127,8 @@ export function installCapture(
   return { cancel };
 }
 
-export async function renderCapture(editor: EdgelessEditor, service: EdgelessRootService, bounds: Bound): Promise<string> {
-  const elements = service.gfx.getElementsByBound(bounds);
+export async function renderCapture(editor: EdgelessEditor, service: EdgelessRootService, bounds: Bound, selectedElements?: GfxModel[]): Promise<string> {
+  const elements = selectedElements ?? service.gfx.getElementsByBound(bounds);
   const common = getCommonBound(elements.map(element => element.elementBound));
   const ratio = Math.min(2,window.devicePixelRatio || 1);
   const maximumSide = Math.max(bounds.w,bounds.h,common?.w ?? 0,common?.h ?? 0);

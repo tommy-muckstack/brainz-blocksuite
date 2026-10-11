@@ -5,15 +5,18 @@ import { AffineSchemas, DefaultTool, NoteTool, EdgelessRootService, EditPropsSto
 import { DocCollection, Schema, Text } from '@blocksuite/store';
 import { Bound, getCommonBound, Point } from '@blocksuite/global/utils';
 import { ToolController } from '@blocksuite/block-std/gfx';
+import type { ExtensionType } from '@blocksuite/block-std';
+import { ConnectionOverlay, OverlayIdentifier } from '@blocksuite/affine-block-surface';
 import { ColorScheme, FontFamily, NoteShadow, StrokeStyle } from '@blocksuite/affine-model';
 import { FontConfigExtension, FontLoaderService } from '@blocksuite/affine-shared/services';
 import { combinedDarkCssVariables } from '@toeverything/theme';
 import * as Y from 'yjs';
 import { base64ToBytes, boardLink, bytesToBase64, supportedLink, type BoardDocument, type BoardTarget, type ImageAsset, type LinkReference } from './model';
 import './style.css';
-import { installCapture, renderCapture } from './capture';
+import { installCapture, installSelectionCapture, renderCapture } from './capture';
 import { CanvasNoteTool, CanvasSelectTool, createNote } from './interactions';
 import { describeScene } from './scene';
+import { CanvasConnectionOverlay, CanvasEditPropsStore } from './canvas-overrides';
 import expandIcon from './icons/expand.svg?raw';
 import collapseIcon from './icons/collapse.svg?raw';
 
@@ -59,6 +62,7 @@ const themeOverrides: Record<string,string> = {'--affine-font-family':'Brainz Ca
 for (const [key, value] of Object.entries(themeOverrides)) document.documentElement.style.setProperty(key,value);
 const get = <T extends HTMLElement = HTMLElement>(id:string) => document.getElementById(id) as T;
 const title = get<HTMLInputElement>('title');
+title.insertAdjacentHTML('afterend','<details id="canvas-menu" class="canvas-menu"><summary aria-label="Canvas options" title="Canvas options">⌄</summary><div role="menu"><button id="new-canvas" role="menuitem">New canvas…</button><button id="move-canvas" role="menuitem">Move to folder…</button></div></details>');
 const saveState = get('save-state');
 const dialog = get<HTMLDialogElement>('link-dialog');
 let editor: EdgelessEditor;
@@ -92,6 +96,7 @@ function post(message: Record<string,unknown>) {
   else if (message.type === 'open') {
     if (supportedLink(String(message.url))) window.open(String(message.url),'_blank','noopener,noreferrer');
   } else if (message.type === 'pickFiles') notice('Drop files into the Brainz app to keep links to their original location.');
+  else if (message.type === 'newCanvas' || message.type === 'moveCanvas') notice('Open this canvas in the Brainz desktop app to choose its folder.');
 }
 function viewport(): [number,number,number] { return [service.viewport.centerX, service.viewport.centerY, service.viewport.zoom]; }
 function snapshot(): BoardDocument {
@@ -226,7 +231,11 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     }
   }
   editor = new EdgelessEditor(); editor.doc = doc;
-  editor.specs = editor.specs.map(extension => extension === DefaultTool ? CanvasSelectTool : extension === NoteTool ? CanvasNoteTool : extension);
+  const overrides = new Map<ExtensionType, ExtensionType>([
+    [DefaultTool, CanvasSelectTool], [NoteTool, CanvasNoteTool],
+    [EditPropsStore, CanvasEditPropsStore], [ConnectionOverlay, CanvasConnectionOverlay],
+  ]);
+  editor.specs = editor.specs.map(extension => overrides.get(extension) ?? extension);
   editor.specs.push(FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal','italic'].flatMap(style => ['300','400','500','600','700'].map(weight => ({font,style,weight,url:`fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf`}))))));
   get('canvas').append(editor);
   await editor.updateComplete;
@@ -244,6 +253,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   controller.currentToolName$.subscribe(name => {
     const mapped:Record<string,string> = {'default':'pointer','pan':'hand','shape':'box','affine:note':'note','connector':'connector','text':'text','brush':'pen'};
     documentButtons().forEach(button => button.setAttribute('aria-pressed',String(button.dataset.tool === mapped[String(name)])));
+    editor.std.get(OverlayIdentifier('connection')).refresh();
   });
   let migratedFont = false;
   for (const element of service.edgelessElements) {
@@ -272,6 +282,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     if (reference) { event.preventDefault(); event.stopImmediatePropagation(); post({type:'open',url:reference.url}); }
   },true);
   installCapture(editor,service,png=>post({type:'copyImage',png}),notice);
+  installSelectionCapture(editor,service,png=>post({type:'copyImage',png}),notice);
   if (import.meta.env.DEV) window.__brainzBoard = {editor,service,collection,links,addNote,addLink,snapshot,focusTarget};
 }
 function documentButtons() { return document.querySelectorAll<HTMLButtonElement>('[data-tool]'); }
@@ -279,6 +290,7 @@ async function receive(message: Record<string,unknown>) {
   switch (message.type) {
     case 'load': try { attachAfterLoad ||= Boolean(message.attach); await load(message.document as BoardDocument|null,message.target as BoardTarget); } catch (error) { console.error(error); const text=String(error); notice(text); post({type:'error',message:text}); } break;
     case 'focus': if (!loading) focusTarget(message.target as BoardTarget); break;
+    case 'relocated': target = message.target as BoardTarget; save(); notice('Canvas moved'); break;
     case 'attach': if (loading) attachAfterLoad = true; else void useInChat(); break;
     case 'saved': savedRevision = Math.max(savedRevision,Number(message.revision)); if (savedRevision >= revision && !saveTimer) { saveState.className='save-state'; saveState.innerHTML='<i></i>Saved locally'; } break;
     case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
@@ -319,6 +331,10 @@ get('copy-object').onclick = () => { const id=service.selection.selectedIds[0]; 
 get('open-object').onclick = () => { const reference=links.get(service.selection.selectedIds[0]); if(reference) post({type:'open',url:reference.url}); };
 get('add-file').onclick = () => post({type:'pickFiles'});
 get('use-chat').onclick = () => { void useInChat(); };
+for (const [id, type] of [['new-canvas','newCanvas'],['move-canvas','moveCanvas']]) {
+  get(id).onclick = () => { get<HTMLDetailsElement>('canvas-menu').open = false; save(); post({type}); };
+}
+document.addEventListener('pointerdown',event => { if (!event.composedPath().includes(get('canvas-menu'))) get<HTMLDetailsElement>('canvas-menu').open = false; });
 get('add-link').onclick = () => { dialog.showModal(); get<HTMLInputElement>('link-url').focus(); };
 get('cancel-link').onclick = () => dialog.close();
 get('link-form').onsubmit = event => {
@@ -328,7 +344,7 @@ get('link-form').onsubmit = event => {
   const label=get<HTMLInputElement>('link-title').value.trim() || decodeURIComponent(url.pathname.split('/').pop() || url.hostname || 'Linked item');
   addLink({title:label,url:url.toString()}); dialog.close(); get<HTMLFormElement>('link-form').reset(); get('link-error').textContent='';
 };
-title.oninput = changed; title.onblur = save; saveState.onclick = save;
+title.oninput = () => { changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = save; saveState.onclick = save;
 window.addEventListener('pointerup',() => { if(saveTimer) save(); });
 window.addEventListener('keyup',() => { if(saveTimer) save(); });
 window.addEventListener('pagehide',save);
