@@ -1,0 +1,31 @@
+{
+  "name": "@brainz/whiteboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@blocksuite/affine-block-surface": "0.19.5",
+    "@blocksuite/affine-model": "0.19.5",
+    "@blocksuite/affine-shared": "0.19.5",
+    "@blocksuite/block-std": "0.19.5",
+    "@blocksuite/blocks": "0.19.5",
+    "@blocksuite/global": "0.19.5",
+    "@blocksuite/icons": "2.1.75",
+    "@blocksuite/presets": "0.19.5",
+    "@blocksuite/store": "0.19.5",
+    "@toeverything/theme": "1.1.23",
+    "lit": "3.3.1",
+    "yjs": "13.6.27"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.15.30",
+    "typescript": "5.8.3",
+    "vite": "6.4.1"
+  }
+}

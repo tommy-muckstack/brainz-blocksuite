@@ -1,0 +1,6 @@
+Brainz Whiteboard uses BlockSuite (MPL-2.0), Yjs (MIT), Lit (BSD-3-Clause),
+and AFFiNE theme/icons. The complete source, dependency versions and license
+notices are available in the Brainz BlockSuite fork:
+https://github.com/tommy-muckstack/brainz-blocksuite/tree/brainz-whiteboard/brainz
+Upstream source: https://github.com/toeverything/blocksuite
+BlockSuite's MPL-2.0 license is included as BLOCKSUITE-LICENSE.txt.
