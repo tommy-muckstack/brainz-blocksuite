@@ -21,6 +21,113 @@ async function drawBox(page:Page,from:[number,number],to:[number,number]) {
 }
 const state = (page:Page) => page.evaluate(()=> (window.__brainzBoard as any).service.edgelessElements.map((element:any)=>({id:element.id,type:element.type,xywh:element.xywh,source:element.source,target:element.target})));
 
+test('single clicks keep notes draggable and double click enters text editing',async({page})=>{
+  await openBoard(page);
+  await page.getByRole('button',{name:'Add your first note'}).click();
+  const note = page.locator('affine-edgeless-note');
+  const editing = () => page.evaluate(()=>(window.__brainzBoard as any).service.selection.editing);
+  expect(await editing()).toBe(false);
+  await note.click({position:{x:50,y:45}});
+  await page.waitForTimeout(600);
+  await note.click({position:{x:50,y:45}});
+  expect(await editing()).toBe(false);
+  const before = (await state(page))[0];
+  const bounds = (await note.boundingBox())!;
+  await page.mouse.move(bounds.x+65,bounds.y+45);await page.mouse.down();
+  await page.mouse.move(bounds.x+145,bounds.y+135,{steps:20});await page.mouse.up();
+  await expect.poll(async()=>(await state(page))[0].xywh).not.toBe(before.xywh);
+  await note.dblclick({position:{x:50,y:45}});
+  await expect.poll(editing).toBe(true);
+  await page.keyboard.type('Drag me without changing this');
+  await page.keyboard.press('Escape');
+  await page.mouse.click(1100,700);
+  await note.click({position:{x:55,y:45}});
+  expect(await editing()).toBe(false);
+  const afterTyping = (await state(page))[0];
+  const movedBounds = (await note.boundingBox())!;
+  await page.mouse.move(movedBounds.x+60,movedBounds.y+45);await page.mouse.down();
+  await page.mouse.move(movedBounds.x-40,movedBounds.y-45,{steps:20});await page.mouse.up();
+  await expect.poll(async()=>(await state(page))[0].xywh).not.toBe(afterTyping.xywh);
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).editor.doc.getBlocksByFlavour('affine:paragraph').map((block:any)=>block.model.text.toString()))).toEqual(['Drag me without changing this']);
+});
+
+test('all drawing controls remain reachable above an open chat dock',async({page})=>{
+  await page.setViewportSize({width:1200,height:375});
+  await openBoard(page);
+  for (const name of ['Select','Sticky note','Box','Capture area']) {
+    const button=page.getByRole('button',{name,exact:true});
+    const bounds=(await button.boundingBox())!;
+    expect(bounds.y).toBeGreaterThanOrEqual(55);
+    expect(bounds.y+bounds.height).toBeLessThan(305);
+    await button.click();
+  }
+  await page.keyboard.press('Escape');
+});
+
+test('chat context includes explicit arrows, the visual canvas, and images after reopening',async({page})=>{
+  page.on('console',message=>{if(message.type()==='error')console.log(message.text());});
+  await openBoard(page);
+  await drawBox(page,[250,240],[440,360]);await drawBox(page,[780,240],[970,360]);
+  await page.getByRole('button',{name:'Connector',exact:true}).click();
+  await page.mouse.move(435,300);await page.mouse.down();await page.mouse.move(785,300,{steps:20});await page.mouse.up();
+  await page.evaluate(()=>{
+    const canvas=document.createElement('canvas');canvas.width=160;canvas.height=100;
+    const context=canvas.getContext('2d')!;context.fillStyle='#ff6600';context.fillRect(0,0,160,100);
+    context.fillStyle='#ffffff';context.fillRect(25,25,110,50);
+    window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'files',files:[{title:'diagram.png',url:'file:///tmp/diagram.png',image:{mime:'image/png',data:canvas.toDataURL('image/png').split(',')[1]}}],position:[400,480]}}));
+  });
+  await expect(page.locator('affine-edgeless-image img')).toBeVisible();
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await expect(page.locator('affine-edgeless-image img')).toBeVisible();
+  expect(await page.locator('affine-edgeless-image img').evaluate(image=>(image as HTMLImageElement).naturalWidth)).toBe(160);
+  await page.getByRole('button',{name:'Use in chat',exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>window.__messages.some(message=>message.type==='attachToChat'))).toBe(true);
+  const context=await page.evaluate(()=>window.__messages.find(message=>message.type==='attachToChat'));
+  const objects=(await state(page)).filter((object:any)=>object.type==='shape');
+  expect(context.scene.connections).toHaveLength(1);
+  expect(context.scene.connections[0].source.objectId).toBe(objects[0].id);
+  expect(context.scene.connections[0].target.objectId).toBe(objects[1].id);
+  expect(context.scene.connections[0].target.marker).toBe('Arrow');
+  const image=context.scene.objects.find((object:any)=>object.kind==='image');
+  expect(image.image.original).toBe('file:///tmp/diagram.png');
+  expect(image.bounds.width).toBeGreaterThan(0);
+  expect(context.preview).toContain('whole canvas');
+  const png=Buffer.from(context.png,'base64');expect(png.subarray(1,4).toString()).toBe('PNG');
+  const orangePixels = await page.evaluate(async png=>{
+    const image=new Image();image.src=`data:image/png;base64,${png}`;await image.decode();
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d')!;context.drawImage(image,0,0);
+    const pixels=context.getImageData(0,0,canvas.width,canvas.height).data;
+    let orange=0;for(let index=0;index<pixels.length;index+=4) if(pixels[index]>240&&pixels[index+1]>90&&pixels[index+1]<120&&pixels[index+2]<10)orange++;
+    return orange;
+  },context.png);
+  expect(orangePixels).toBeGreaterThan(1000);
+  await test.info().attach('AI canvas preview',{body:png,contentType:'image/png'});
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('test-board')!));
+  expect(saved.scene.connections[0].source.objectId).toBe(objects[0].id);
+  expect(Object.keys(saved.images)).toHaveLength(1);
+});
+
+test('shape text uses the loaded canvas font and fit restores the previous view',async({page})=>{
+  await openBoard(page);await drawBox(page,[300,260],[550,410]);
+  await page.mouse.dblclick(420,325);await page.keyboard.type('Hey');await page.keyboard.press('Escape');
+  await page.mouse.click(850,650);
+  expect(await page.evaluate(()=>document.fonts.check('18px "blocksuite:surface:Inter"'))).toBe(true);
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements[0].fontFamily)).toBe('blocksuite:surface:Inter');
+  await page.evaluate(()=>{
+    const board=window.__brainzBoard as any;
+    board.service.gfx.updateElement(board.service.edgelessElements[0],{fontFamily:'Inter'});
+  });
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements[0].fontFamily)).toBe('blocksuite:surface:Inter');
+  await page.getByRole('button',{name:'Fit to content',exact:true}).click();
+  await page.getByRole('button',{name:'Restore previous view',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Fit to content',exact:true})).toBeVisible();
+  await page.screenshot({path:test.info().outputPath('shape-font.png')});
+});
+
 test('draw, attach connectors, move boxes, edit notes and reopen the saved board',async({page})=>{
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
   await openBoard(page);
@@ -35,6 +142,7 @@ test('draw, attach connectors, move boxes, edit notes and reopen the saved board
   await expect.poll(async()=> (await state(page)).find((e:any)=>e.id===before[0].id)?.xywh).not.toBe(before[0].xywh);
   expect((await state(page)).find((e:any)=>e.id===connector.id)?.source.id).toBe(before[0].id);
   await page.getByRole('button',{name:'Sticky note',exact:true}).click();await page.mouse.click(700,550);
+  await page.locator('affine-edgeless-note').dblclick({position:{x:50,y:45}});
   await expect(page.locator('rich-text [contenteditable=true]')).toBeVisible();
   await page.keyboard.type('Ideas worth keeping');await page.keyboard.press('Escape');await page.mouse.click(560,700);
   await expect.poll(()=>page.evaluate(()=> (window.__brainzBoard as any).editor.doc.getBlocksByFlavour('affine:paragraph').map((b:any)=>b.model.text.toString()))).toContain('Ideas worth keeping');
@@ -92,6 +200,7 @@ test('capture pans at all four edges and copies offscreen content as PNG',async(
 test('capture includes sticky-note text and keeps the document unchanged',async({page})=>{
   await openBoard(page);
   await page.getByRole('button',{name:'Add your first note'}).click();
+  await page.locator('affine-edgeless-note').dblclick({position:{x:50,y:45}});
   await expect(page.locator('rich-text [contenteditable=true]')).toBeVisible();
   await page.keyboard.type('Capture this thought');await page.keyboard.press('Escape');
   await expect.poll(()=>page.evaluate(()=> (window.__brainzBoard as any).editor.doc.getBlocksByFlavour('affine:paragraph').map((b:any)=>b.model.text.toString()))).toContain('Capture this thought');

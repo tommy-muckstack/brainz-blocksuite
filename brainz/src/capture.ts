@@ -107,18 +107,28 @@ export async function renderCapture(editor: EdgelessEditor, service: EdgelessRoo
     const root = editor.std.view.getBlock(editor.doc.root!.id) as EdgelessRootBlockComponent;
     const {notes,frames,images,edgelessTexts,embedSyncedDocs,shapes} = BlocksUtils.splitElements(elements);
     const original: [number,Point] = [service.zoom,[service.viewport.centerX,service.viewport.centerY]];
+    let exportContainer: HTMLDivElement | undefined;
     try {
       document.body.classList.add('exporting-canvas');
       // Mount notes outside the current screen before exporting their rich text.
       service.viewport.setViewportByBound(common,[40,40,40,40],false);
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       const blocks = [...notes,...frames,...images,...edgelessTexts,...embedSyncedDocs];
+      // BlockSuite's exporter requires a note container even for an image-only
+      // board. Supply the empty DOM container without adding a document block.
+      if (blocks.length && !root.querySelector('.affine-block-children-container')) {
+        exportContainer = document.createElement('div');
+        exportContainer.className = 'affine-block-children-container';
+        exportContainer.hidden = true;
+        root.append(exportContainer);
+      }
       const image = blocks.length
         ? await root.clipboardController.toCanvas(blocks,shapes,{padding:0,dpr:ratio,background:'#141413'})
         : root.surface.renderer.getCanvasByBound(common,shapes);
       if (!image) throw new Error('The canvas could not be rendered.');
       context.drawImage(image,(common.x-bounds.x)*ratio,(common.y-bounds.y)*ratio,common.w*ratio,common.h*ratio);
     } finally {
+      exportContainer?.remove();
       document.body.classList.remove('exporting-canvas');
       service.viewport.setViewport(original[0],original[1]);
     }

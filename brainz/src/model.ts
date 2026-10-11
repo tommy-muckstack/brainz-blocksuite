@@ -1,6 +1,7 @@
 export interface BoardTarget { path: string; object?: string | null; viewport?: [number, number, number] | null }
-export interface BoardDocument { format: 'brainz-whiteboard'; version: 1; title: string; data: string; viewport: [number, number, number] }
-export interface LinkReference { title: string; url: string }
+export interface ImageAsset { data: string; mime: string }
+export interface BoardDocument { format: 'brainz-whiteboard'; version: 1; title: string; data: string; viewport: [number, number, number]; images?: Record<string,ImageAsset>; scene?: unknown }
+export interface LinkReference { title: string; url: string; image?: ImageAsset }
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));

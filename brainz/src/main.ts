@@ -1,16 +1,21 @@
 import { effects as presetEffects } from '@blocksuite/presets/effects';
 import { effects as blockEffects } from '@blocksuite/blocks/effects';
 import { EdgelessEditor } from '@blocksuite/presets';
-import { AffineSchemas, EdgelessRootService, EditPropsStore, ShapeType, ShapeStyle, ConnectorMode, ThemeProvider, addNote as createStickyNote } from '@blocksuite/blocks';
+import { AffineSchemas, DefaultTool, NoteTool, EdgelessRootService, EditPropsStore, ShapeType, ShapeStyle, ConnectorMode, ThemeProvider } from '@blocksuite/blocks';
 import { DocCollection, Schema, Text } from '@blocksuite/store';
-import { Point } from '@blocksuite/global/utils';
+import { Bound, getCommonBound, Point } from '@blocksuite/global/utils';
 import { ToolController } from '@blocksuite/block-std/gfx';
-import { ColorScheme, NoteShadow, StrokeStyle } from '@blocksuite/affine-model';
+import { ColorScheme, FontFamily, NoteShadow, StrokeStyle } from '@blocksuite/affine-model';
+import { FontConfigExtension, FontLoaderService } from '@blocksuite/affine-shared/services';
 import { combinedDarkCssVariables } from '@toeverything/theme';
 import * as Y from 'yjs';
-import { base64ToBytes, boardLink, bytesToBase64, supportedLink, type BoardDocument, type BoardTarget, type LinkReference } from './model';
+import { base64ToBytes, boardLink, bytesToBase64, supportedLink, type BoardDocument, type BoardTarget, type ImageAsset, type LinkReference } from './model';
 import './style.css';
-import { installCapture } from './capture';
+import { installCapture, renderCapture } from './capture';
+import { CanvasNoteTool, CanvasSelectTool, createNote } from './interactions';
+import { describeScene } from './scene';
+import expandIcon from './icons/expand.svg?raw';
+import collapseIcon from './icons/collapse.svg?raw';
 
 declare global {
   interface Window { ipc?: { postMessage(message: string): void }; __brainzBoard?: unknown }
@@ -37,10 +42,10 @@ const paths: Record<string, string> = {
   plus: 'M12 5v14M5 12h14', minus: 'M5 12h14',
   arrow: 'M7 17L17 7M7 7h10v10', close: 'M6 6l12 12M18 6L6 18',
 };
-const icon = (name: string) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]}"/></svg>`;
+const icon = (name: string) => name === 'fit' ? expandIcon : name === 'collapse' ? collapseIcon : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]}"/></svg>`;
 const tool = (name: string, label: string, shortcut: string) => `<button class="tool" data-tool="${name}" aria-label="${label}" aria-pressed="false" title="${label} (${shortcut})">${icon(name)}<span class="tooltip">${label}<kbd>${shortcut}</kbd></span></button>`;
 app.innerHTML = `
-<header class="topbar"><div class="board-name">${icon('canvas')}<input id="title" aria-label="Board name" value="Untitled canvas" maxlength="120"><span class="save-state" id="save-state" role="status"><i></i>Opening…</span></div><div class="header-actions"><button id="add-file" class="text-button">${icon('file')}Add file</button><button id="copy-view" class="text-button share">${icon('link')}Copy view link</button></div></header>
+<header class="topbar"><div class="board-name">${icon('canvas')}<input id="title" aria-label="Board name" value="Untitled canvas" maxlength="120"><span class="save-state" id="save-state" role="status"><i></i>Opening…</span></div><div class="header-actions"><button id="use-chat" class="text-button" title="Attach objects, connections, and an image to your current Claude or Codex chat">${icon('canvas')}Use in chat</button><button id="add-file" class="text-button">${icon('file')}Add file</button><button id="copy-view" class="text-button share">${icon('link')}Copy view link</button></div></header>
 <main id="canvas" aria-label="Infinite whiteboard"></main>
 <div class="empty-state" id="empty"><div class="empty-symbol">${icon('canvas')}</div><h1>A little room to think.</h1><p>Map an idea. Connect the dots.<br>Bring your notes into the picture.</p><button id="first-note" class="primary">${icon('plus')}Add your first note</button><span>or drop a file anywhere</span></div>
 <nav class="tools" aria-label="Drawing tools">${tool('pointer','Select','V')}${tool('hand','Pan','H')}<div class="rule"></div>${tool('note','Sticky note','N')}${tool('box','Box','R')}${tool('connector','Connector','C')}${tool('text','Text','T')}${tool('pen','Draw','P')}<div class="rule"></div><button id="add-link" class="tool" aria-label="Add link" title="Add a Brainz, My Man, or web link">${icon('link')}</button><div class="rule"></div><button id="capture" class="tool" aria-label="Capture area" aria-pressed="false" title="Drag an area to copy as an image">${icon('capture')}<span class="tooltip">Capture area</span></button></nav>
@@ -50,7 +55,7 @@ app.innerHTML = `
 <div id="toast" role="status" hidden></div>
 <dialog id="link-dialog"><form id="link-form"><div class="dialog-title"><h2>Add a link</h2><button type="button" id="cancel-link" aria-label="Close">${icon('close')}</button></div><p>Connect something from Brainz, My Man, or the web.</p><label>Link<input id="link-url" type="text" placeholder="brainz://… or https://…" required autocomplete="off"></label><label>Label<input id="link-title" type="text" placeholder="Give it a name" maxlength="160"></label><div id="link-error" role="alert"></div><button class="primary" type="submit">Add to canvas</button></form></dialog>`;
 for (const [property, value] of Object.entries(combinedDarkCssVariables)) document.documentElement.style.setProperty(property, String(value));
-const themeOverrides: Record<string,string> = {'--affine-font-family':'-apple-system, BlinkMacSystemFont, sans-serif','--affine-background-primary-color':'#141413','--affine-background-secondary-color':'#22221f','--affine-background-overlay-panel-color':'#282823','--affine-text-primary-color':'#e5e3da','--affine-text-secondary-color':'#99988e','--affine-primary-color':'#e2c76b','--affine-border-color':'#3b3b34','--affine-hover-color':'#d8c87a26','--affine-tooltip':'#2e2e28'};
+const themeOverrides: Record<string,string> = {'--affine-font-family':'Brainz Canvas, Gellix, sans-serif','--affine-background-primary-color':'#141413','--affine-background-secondary-color':'#22221f','--affine-background-overlay-panel-color':'#282823','--affine-text-primary-color':'#e5e3da','--affine-text-secondary-color':'#99988e','--affine-primary-color':'#e2c76b','--affine-border-color':'#3b3b34','--affine-hover-color':'#d8c87a26','--affine-tooltip':'#2e2e28'};
 for (const [key, value] of Object.entries(themeOverrides)) document.documentElement.style.setProperty(key,value);
 const get = <T extends HTMLElement = HTMLElement>(id:string) => document.getElementById(id) as T;
 const title = get<HTMLInputElement>('title');
@@ -61,12 +66,14 @@ let collection: DocCollection;
 let service: EdgelessRootService;
 let target: BoardTarget = { path: '/preview/Whiteboard.brainzboard' };
 let links: Y.Map<LinkReference>;
+let images: Record<string,ImageAsset> = {};
 let revision = 0;
 let savedRevision = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let viewportTimer: ReturnType<typeof setTimeout> | undefined;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let loading = true;
+let previousViewport: [number,number,number] | undefined;
 
 function notice(message: string) {
   const toast = get('toast'); toast.textContent = message; toast.hidden = false;
@@ -87,7 +94,7 @@ function post(message: Record<string,unknown>) {
 }
 function viewport(): [number,number,number] { return [service.viewport.centerX, service.viewport.centerY, service.viewport.zoom]; }
 function snapshot(): BoardDocument {
-  return { format:'brainz-whiteboard',version:1,title:title.value.trim() || 'Untitled canvas',data:bytesToBase64(Y.encodeStateAsUpdate(editor.doc.spaceDoc)),viewport:viewport() };
+  return { format:'brainz-whiteboard',version:1,title:title.value.trim() || 'Untitled canvas',data:bytesToBase64(Y.encodeStateAsUpdate(editor.doc.spaceDoc)),viewport:viewport(),images,scene:describeScene(service,links,target,title.value) };
 }
 function save() {
   clearTimeout(saveTimer); saveTimer = undefined;
@@ -107,7 +114,7 @@ function selectTool(name: string) {
   if (!service) return;
   const controller = editor.std.get(ToolController);
   switch (name) {
-    case 'pointer': controller.setTool('default'); break;
+    case 'pointer': controller.setTool('default'); service.selection.set({elements:service.selection.selectedIds,editing:false}); window.getSelection()?.removeAllRanges(); break;
     case 'hand': controller.setTool('pan',{panning:false}); break;
     case 'box': controller.setTool('shape',{shapeName:'roundedRect'}); break;
     case 'note': controller.setTool('affine:note',{childFlavour:'affine:paragraph',childType:'text',tip:'Write something…'}); break;
@@ -118,7 +125,7 @@ function selectTool(name: string) {
 }
 function addNote() {
   const [x,y] = service.viewport.toViewCoord(service.viewport.centerX-110,service.viewport.centerY-60);
-  createStickyNote(editor.std,new Point(x,y),{childFlavour:'affine:paragraph',childType:'text',collapse:true},280,200);
+  createNote(editor.std,new Point(x,y));
   updateEmpty();
 }
 function addLink(reference: LinkReference, position?: [number,number]) {
@@ -126,10 +133,52 @@ function addLink(reference: LinkReference, position?: [number,number]) {
   const [x,y] = position ?? [service.viewport.centerX-140,service.viewport.centerY-50];
   const url = new URL(reference.url);
   const kind = url.protocol === 'file:' ? 'Brainz · Open file' : url.protocol === 'brainz:' ? 'Brainz · Open' : url.protocol === 'myman:' ? 'My Man · Open' : url.hostname || 'Link';
-  const id = service.surface.addElement({type:'shape',index:service.generateIndex(),shapeType:ShapeType.Rect,shapeStyle:ShapeStyle.General,xywh:JSON.stringify([x,y,280,108]),radius:.08,filled:true,fillColor:'#272923',strokeColor:'#555849',strokeWidth:1.5,color:'#e7e5dc',fontSize:16,fontFamily:'Inter',text:new Y.Text(`↗ ${reference.title}\n${kind}`)});
+  const id = service.surface.addElement({type:'shape',index:service.generateIndex(),shapeType:ShapeType.Rect,shapeStyle:ShapeStyle.General,xywh:JSON.stringify([x,y,280,108]),radius:.08,filled:true,fillColor:'#272923',strokeColor:'#555849',strokeWidth:1.5,color:'#e7e5dc',fontSize:16,fontFamily:FontFamily.Inter,text:new Y.Text(`↗ ${reference.title}\n${kind}`)});
   links.set(id,reference);
   service.selection.set({elements:[id],editing:false});
   selectTool('pointer'); save(); updateEmpty(); return id;
+}
+async function addFile(reference: LinkReference, position: [number,number]) {
+  if (!reference.image) { addLink(reference,position); return; }
+  const asset = reference.image;
+  if (JSON.stringify(snapshot()).length + asset.data.length > 23*1024*1024) throw new Error('This board is nearly full. Add the image as a file link instead.');
+  const bytes = base64ToBytes(asset.data);
+  if (bytes.length > 8*1024*1024 || !['image/png','image/jpeg','image/webp','image/gif'].includes(asset.mime)) throw new Error('Use a PNG, JPEG, WebP, or GIF under 8 MB.');
+  const bitmap = await createImageBitmap(new Blob([bytes],{type:asset.mime}));
+  const width = Math.min(520,bitmap.width), height = bitmap.height*width/bitmap.width;
+  bitmap.close();
+  const sourceId = `image-${collection.idGenerator()}`;
+  await editor.doc.blobSync.set(sourceId,new Blob([bytes],{type:asset.mime}));
+  images[sourceId] = asset;
+  const id = editor.doc.addBlock('affine:image',{sourceId,size:bytes.length,width,height,xywh:new Bound(...position,width,height).serialize(),caption:reference.title},service.surface);
+  links.set(id,{title:reference.title,url:reference.url});
+  service.selection.set({elements:[id],editing:false});
+  selectTool('pointer'); save(); updateEmpty();
+}
+
+async function useInChat() {
+  if (!service) return;
+  const button = get<HTMLButtonElement>('use-chat'); button.disabled = true;
+  notice('Preparing canvas context…');
+  try {
+    const bounds = getCommonBound(service.edgelessElements.map(element=>element.elementBound));
+    let png: string | undefined;
+    let preview = 'No objects to preview.';
+    if (bounds) {
+      const padded = new Bound(bounds.x-24,bounds.y-24,bounds.w+48,bounds.h+48);
+      try { png = await renderCapture(editor,service,padded); preview = 'The attached image shows the whole canvas.'; }
+      catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith('Select a smaller area')) throw error;
+        const view = get('canvas').getBoundingClientRect();
+        const [x,y] = service.viewport.toModelCoord(0,0);
+        png = await renderCapture(editor,service,new Bound(x,y,view.width/service.zoom,view.height/service.zoom));
+        preview = 'The canvas is too large for one image. The attached image shows the current viewport; the structured map includes every object.';
+      }
+    }
+    save();
+    post({type:'attachToChat',scene:describeScene(service,links,target,title.value),png,preview});
+  } catch(error) { console.error(error); notice(`Could not attach canvas: ${error instanceof Error ? error.message : String(error)}`); }
+  finally { button.disabled = false; }
 }
 function updateSelection() {
   const ids = service.selection.selectedIds;
@@ -161,6 +210,8 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   collection.meta.initialize();
   const doc = collection.createDoc({id:'canvas'});
   doc.load();
+  images = document?.images || {};
+  for (const [id,asset] of Object.entries(images)) await doc.blobSync.set(id,new Blob([base64ToBytes(asset.data)],{type:asset.mime}));
   {
     if (document) {
       if (document.format !== 'brainz-whiteboard' || document.version !== 1) throw new Error('Unsupported whiteboard file');
@@ -171,14 +222,17 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
        doc.addBlock('affine:surface',{},page);
     }
   }
-   editor = new EdgelessEditor(); editor.doc = doc;
+  editor = new EdgelessEditor(); editor.doc = doc;
+  editor.specs = editor.specs.map(extension => extension === DefaultTool ? CanvasSelectTool : extension === NoteTool ? CanvasNoteTool : extension);
+  editor.specs.push(FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal','italic'].flatMap(style => ['300','400','500','600','700'].map(weight => ({font,style,weight,url:`fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf`}))))));
   get('canvas').append(editor);
   await editor.updateComplete;
+  await editor.std.get(FontLoaderService).ready;
   service = editor.std.get(EdgelessRootService);
   editor.std.get(ThemeProvider).app$.value = ColorScheme.Dark;
   editor.std.get(ThemeProvider).edgeless$.value = ColorScheme.Dark;
   const defaults = editor.std.get(EditPropsStore);
-  defaults.recordLastProps('shape:roundedRect',{fillColor:{normal:'#292c28'},strokeColor:{normal:'#a6b995'},strokeWidth:2,color:{normal:'#e5e3da'},radius:.1,shapeStyle:ShapeStyle.General,fontSize:18});
+  defaults.recordLastProps('shape:roundedRect',{fillColor:{normal:'#292c28'},strokeColor:{normal:'#a6b995'},strokeWidth:2,color:{normal:'#e5e3da'},radius:.1,shapeStyle:ShapeStyle.General,fontSize:18,fontFamily:FontFamily.Inter});
   defaults.recordLastProps('affine:note',{background:{normal:'#e6ca78'},edgeless:{style:{borderRadius:12,borderSize:0,borderStyle:StrokeStyle.None,shadowType:NoteShadow.Box}}});
   defaults.recordLastProps('connector',{stroke:{normal:'#a8b59a'},strokeWidth:2});
   title.value = document?.title || 'Untitled canvas';
@@ -188,6 +242,12 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     const mapped:Record<string,string> = {'default':'pointer','pan':'hand','shape':'box','affine:note':'note','connector':'connector','text':'text','brush':'pen'};
     documentButtons().forEach(button => button.setAttribute('aria-pressed',String(button.dataset.tool === mapped[String(name)])));
   });
+  let migratedFont = false;
+  for (const element of service.edgelessElements) {
+    if ('fontFamily' in element && element.fontFamily !== FontFamily.Inter) {
+      service.gfx.updateElement(element,{fontFamily:FontFamily.Inter}); migratedFont = true;
+    }
+  }
   doc.resetHistory();
   service.selection.slots.updated.on(updateSelection);
   doc.spaceDoc.on('update',changed);
@@ -201,7 +261,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   loading = false; selectTool('pointer'); updateEmpty();
   saveState.className = 'save-state'; saveState.innerHTML = '<i></i>Saved locally';
   if (next.object || next.viewport) focusTarget(next);
-  if (!document) save();
+  if (!document || migratedFont) save();
   editor.addEventListener('dblclick',event => {
     const id = service.selection.selectedIds[0];
     const reference = links.get(id);
@@ -222,7 +282,11 @@ async function receive(message: Record<string,unknown>) {
       const files = message.files as LinkReference[];
       const point = message.position as [number,number]|null;
       const position: [number,number] = point ? service.viewport.toModelCoordFromClientCoord([point[0],point[1]]) : [service.viewport.centerX-140,service.viewport.centerY-50];
-      files.forEach((file,index) => addLink(file,[position[0]+index*30,position[1]+index*130])); break;
+      for (const [index,file] of files.entries()) {
+        try { await addFile(file,[position[0]+index*30,position[1]+index*130]); }
+        catch(error) { notice(`Could not add ${file.title}: ${String(error)}`); }
+      }
+      break;
     }
   }
 }
@@ -234,11 +298,22 @@ get('redo').onclick = () => { editor?.doc.redo(); updateEmpty(); };
 get('zoom-in').onclick = () => service?.viewport.smoothZoom(Math.min(6,service.zoom*1.2));
 get('zoom-out').onclick = () => service?.viewport.smoothZoom(Math.max(.1,service.zoom/1.2));
 get('zoom-reset').onclick = () => service?.viewport.smoothZoom(1);
-get('fit').onclick = () => service?.zoomToFit();
+get('fit').onclick = () => {
+  if (!service) return;
+  if (previousViewport) {
+    service.viewport.setViewport(previousViewport[2],[previousViewport[0],previousViewport[1]],true);
+    previousViewport = undefined;
+    get('fit').innerHTML = icon('fit'); get('fit').setAttribute('aria-label','Fit to content'); get('fit').title = 'Fit to content (⇧1)';
+  } else {
+    previousViewport = viewport(); service.zoomToFit();
+    get('fit').innerHTML = icon('collapse'); get('fit').setAttribute('aria-label','Restore previous view'); get('fit').title = 'Restore previous view';
+  }
+};
 get('copy-view').onclick = () => service && post({type:'copy',text:boardLink(target,viewport())});
 get('copy-object').onclick = () => { const id=service.selection.selectedIds[0]; if(id) post({type:'copy',text:boardLink(target,viewport(),id)}); };
 get('open-object').onclick = () => { const reference=links.get(service.selection.selectedIds[0]); if(reference) post({type:'open',url:reference.url}); };
 get('add-file').onclick = () => post({type:'pickFiles'});
+get('use-chat').onclick = () => { void useInChat(); };
 get('add-link').onclick = () => { dialog.showModal(); get<HTMLInputElement>('link-url').focus(); };
 get('cancel-link').onclick = () => dialog.close();
 get('link-form').onsubmit = event => {

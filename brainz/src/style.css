@@ -1,4 +1,6 @@
-:root { color-scheme:dark; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#e5e3da; background:#141413; font-synthesis:none; }
+@font-face { font-family:'Brainz Canvas'; src:local('Gellix'),url('/fonts/Brainz-Regular.ttf') format('truetype'); font-weight:100 900; font-style:normal; font-display:swap; }
+@font-face { font-family:'Brainz Canvas'; src:local('Gellix Italic'),url('/fonts/Brainz-Italic.ttf') format('truetype'); font-weight:100 900; font-style:italic; font-display:swap; }
+:root { color-scheme:dark; font-family:'Brainz Canvas','Gellix',sans-serif; color:#e5e3da; background:#141413; font-synthesis:none; }
 * { box-sizing:border-box; }
 body { margin:0; overflow:hidden; }
 .exporting-canvas .edgeless-note-collapse-button { visibility:hidden!important; }
@@ -40,6 +42,11 @@ h1 { font-weight:500; letter-spacing:-.7px; font-size:27px; margin:0 0 12px; } .
 dialog { color:#e5e3da; background:#24241f; border:1px solid #454438; border-radius:17px; padding:24px; width:400px; max-width:90vw; box-shadow:0 20px 100px #0009; }dialog::backdrop { background:#090a0866; backdrop-filter:blur(4px); }.dialog-title { display:flex; align-items:center; justify-content:space-between; }.dialog-title h2 { font-size:19px; letter-spacing:-.3px; font-weight:550; margin:0; }.dialog-title button { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; }.dialog-title button:hover { background:#3a392f; }dialog p { color:#a19f92; font-size:12px; line-height:1.6; margin:10px 0 22px; }dialog label { display:flex; flex-direction:column; gap:8px; font-size:12px; color:#b6b2a4; margin:16px 0; }dialog input { width:100%; border-radius:9px; border:1px solid #454438; background:#1a1a17; color:#e6e1d2; padding:11px 12px; font-size:13px; }dialog input::placeholder { color:#716e61; }dialog .primary { width:100%; margin-top:12px; }#link-error { color:#eda58d; font-size:12px; }
 @keyframes breathe { 50% { opacity:.3; } }
 @media(max-width:760px) { .hint,.save-state { display:none; }.header-actions { gap:3px; }.topbar { padding:0 12px; gap:8px; }.text-button { padding:7px; }.tools { left:10px; } }
+@media(max-height:660px) {
+  .tools { top:70px; bottom:70px; transform:none; display:grid; grid-template-columns:repeat(2,32px); align-content:start; gap:3px; overflow-y:auto; }
+  .tools .rule,.tools .tooltip { display:none; }
+  .tools .tool { width:32px; height:32px; }
+}
 @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }
 
 .capture-overlay { position:absolute; inset:0; z-index:100; cursor:crosshair; touch-action:none; overflow:hidden; background:#0001; }
