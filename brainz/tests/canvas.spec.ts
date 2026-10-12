@@ -8,8 +8,9 @@ async function openBoard(page: Page) {
     window.__target={path:'/tmp/Brainz test.board.brainzboard'};
     window.ipc={postMessage(value:string){
       const message=JSON.parse(value);window.__messages.push(message);
-      if(message.type==='ready') queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'load',document:JSON.parse(localStorage.getItem('test-board') || 'null'),target:window.__target,attach:localStorage.getItem('test-attach')==='true'}})));
+      if(message.type==='ready') queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'load',document:JSON.parse(localStorage.getItem('test-board') || 'null'),viewState:JSON.parse(localStorage.getItem('test-view') || 'null'),target:window.__target,attach:localStorage.getItem('test-attach')==='true'}})));
       if(message.type==='save') {localStorage.setItem('test-board',JSON.stringify(message.document));queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'saved',revision:message.revision}})));}
+      if(message.type==='viewState') localStorage.setItem('test-view',JSON.stringify(message.viewport));
     }};
   });
   await page.goto('/');
@@ -20,6 +21,39 @@ async function drawBox(page:Page,from:[number,number],to:[number,number]) {
   await page.mouse.move(...from);await page.mouse.down();await page.mouse.move(...to,{steps:15});await page.mouse.up();
 }
 const state = (page:Page) => page.evaluate(()=> (window.__brainzBoard as any).service.edgelessElements.map((element:any)=>({id:element.id,type:element.type,xywh:element.xywh,source:element.source,target:element.target})));
+
+test('Ten seconds of panning and zooming save only local view state; reopening does not rewrite the canvas',async({page})=>{
+  await openBoard(page);
+  await expect(page.locator('#save-state')).toContainText('Saved');
+  const before = await page.evaluate(()=>localStorage.getItem('test-board'));
+  await page.evaluate(async()=>{
+    window.__messages=[];
+    const {service} = window.__brainzBoard as any;
+    for(let index=0;index<100;index++) {
+      service.viewport.setViewport(0.5+index/100,[index*12,-index*7]);
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  const messages = await page.evaluate(()=>window.__messages);
+  expect(messages.filter(message=>message.type==='save')).toEqual([]);
+  const views = messages.filter(message=>message.type==='viewState');
+  expect(views.length).toBeGreaterThan(0); expect(views.length).toBeLessThanOrEqual(11);
+  expect(views.at(-1).viewport).toEqual([1188,-693,1.49]);
+  expect(await page.evaluate(()=>localStorage.getItem('test-board'))).toBe(before);
+  const context = await page.evaluate(async()=>new Promise<any>(resolve=>{
+    const post = window.ipc!.postMessage;
+    window.ipc!.postMessage = value => { const message=JSON.parse(value); if(message.type==='canvasResponse') { window.ipc!.postMessage=post; resolve(message.result.context); } else post(value); };
+    window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'canvasRequest',request:{requestId:'live-read',kind:'read'}}}));
+  }));
+  expect(context.viewport.zoom).toBe(1.49);
+  expect(context.viewport.x).toBeGreaterThan(500);
+  expect(await page.evaluate(()=>window.__messages.filter(message=>message.type==='save'))).toEqual([]);
+  await page.reload(); await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await expect.poll(()=>page.evaluate(()=>{const {service}=window.__brainzBoard as any;return [service.viewport.centerX,service.viewport.centerY,service.zoom];})).toEqual([1188,-693,1.49]);
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(()=>window.__messages.filter(message=>message.type==='save'))).toEqual([]);
+});
 
 async function colorCounts(page:Page, points:number[][], color:number[], radius=7) {
   const screenshot=(await page.screenshot()).toString('base64');
@@ -287,6 +321,7 @@ test('shape text uses the loaded canvas font and fit restores the previous view'
   expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements[0].fontFamily)).toBe('blocksuite:surface:Inter');
   await page.evaluate(()=>{
     const board=window.__brainzBoard as any;
+    board.editor.doc.spaceDoc.getMap('brainz:migrations').delete('canvas-font');
     board.service.gfx.updateElement(board.service.edgelessElements[0],{fontFamily:'Inter'});
   });
   await expect(page.locator('#save-state')).toHaveText('Saved locally');

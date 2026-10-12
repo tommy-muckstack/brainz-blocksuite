@@ -89,6 +89,7 @@ let workspaceRoot: string | undefined;
 let agentEnabled = !native || import.meta.env.DEV;
 let boardId: string = crypto.randomUUID();
 let baseHash: string | undefined;
+let localView: [number,number,number] | undefined;
 const pendingResults: {revision:number;message:Record<string,unknown>}[] = [];
 
 function notice(message: string) {
@@ -113,6 +114,9 @@ function post(message: Record<string,unknown>) {
   } else if (message.type === 'copyImage') {
     const blob = new Blob([base64ToBytes(String(message.png))],{type:'image/png'});
     navigator.clipboard.write([new ClipboardItem({'image/png':blob})]).then(()=>notice('Canvas copied to clipboard')).catch(()=>notice('Clipboard access was denied.'));
+  } else if (message.type === 'viewState') {
+    try { localStorage.setItem(`brainz-view-${boardId}`,JSON.stringify(message.viewport)); }
+    catch { notice('Could not save the canvas view position'); }
   } else if (message.type === 'copy') navigator.clipboard.writeText(String(message.text)).then(() => notice('Link copied')).catch(() => notice('Clipboard is unavailable'));
   else if (message.type === 'open') {
     if (supportedLink(String(message.url))) window.open(String(message.url),'_blank','noopener,noreferrer');
@@ -121,7 +125,15 @@ function post(message: Record<string,unknown>) {
 }
 function viewport(): [number,number,number] { return [service.viewport.centerX, service.viewport.centerY, service.viewport.zoom]; }
 function snapshot(): BoardDocument {
-  return { format:'brainz-whiteboard',version:1,id:boardId,title:title.value.trim() || 'Untitled canvas',data:bytesToBase64(Y.encodeStateAsUpdate(editor.doc.spaceDoc)),viewport:viewport(),images,scene:agent?.read() ?? describeScene(service,links,target,title.value) };
+  return { format:'brainz-whiteboard',version:1,id:boardId,title:title.value.trim() || 'Untitled canvas',data:bytesToBase64(Y.encodeStateAsUpdate(editor.doc.spaceDoc)),images,scene:agent?.read() ?? describeScene(service,links,target,title.value) };
+}
+function saveView() {
+  clearTimeout(viewportTimer); viewportTimer = undefined;
+  if (!loading && service) post({type:'viewState',viewport:viewport()});
+}
+function flush() {
+  if (saveTimer || savedRevision < revision) save();
+  if (viewportTimer) saveView();
 }
 function save() {
   clearTimeout(saveTimer); saveTimer = undefined;
@@ -274,27 +286,31 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     documentButtons().forEach(button => button.setAttribute('aria-pressed',String(button.dataset.tool === mapped[String(name)])));
     editor.std.get(OverlayIdentifier('connection')).refresh();
   });
-  let migratedFont = false;
-  for (const element of service.edgelessElements) {
-    if ('fontFamily' in element && element.fontFamily !== FontFamily.Inter) {
-      service.gfx.updateElement(element,{fontFamily:FontFamily.Inter}); migratedFont = true;
+  const migrations = doc.spaceDoc.getMap<number>('brainz:migrations');
+  const migratedFont = migrations.get('canvas-font') !== 1;
+  if (migratedFont) {
+    for (const element of service.edgelessElements) {
+      if ('fontFamily' in element && element.fontFamily !== FontFamily.Inter) service.gfx.updateElement(element,{fontFamily:FontFamily.Inter});
     }
+    migrations.set('canvas-font',1);
   }
   doc.resetHistory();
   service.selection.slots.updated.on(updateSelection);
   doc.spaceDoc.on('update',changed);
   service.viewport.viewportUpdated.on(({zoom}) => {
     get('zoom').textContent = `${Math.round(zoom*100)}%`;
-    if (!loading) { clearTimeout(viewportTimer); viewportTimer = setTimeout(save,400); }
+    if (!loading && !viewportTimer) viewportTimer = setTimeout(saveView,1000);
   });
   await new Promise(requestAnimationFrame);
-  if (document?.viewport) service.viewport.setViewport(document.viewport[2],[document.viewport[0],document.viewport[1]]);
+  const restoredView = localView ?? document?.viewport;
+  if (restoredView) service.viewport.setViewport(restoredView[2],[restoredView[0],restoredView[1]]);
   else service.viewport.setViewport(1,[0,0]);
   loading = false; selectTool('pointer'); updateEmpty();
   saveState.className = 'save-state'; saveState.innerHTML = '<i></i>Saved locally';
   if (next.object || next.viewport) focusTarget(next);
   if (attachAfterLoad) { attachAfterLoad = false; void attachToChat(); }
   if (!document || migratedFont) save();
+  if (document?.viewport && !localView) saveView();
   editor.addEventListener('dblclick',event => {
     const id = service.selection.selectedIds[0];
     const reference = links.get(id);
@@ -319,6 +335,12 @@ async function receive(message: Record<string,unknown>) {
       attachAfterLoad ||= Boolean(message.attach);
       workspaceRoot = typeof message.workspace === 'string' ? message.workspace : undefined;
       if (message.document) boardId = (message.document as BoardDocument).id ?? (typeof message.boardId === 'string' ? message.boardId : boardId);
+      let view: unknown = message.viewState;
+      if (!native && !view) {
+        try { view = JSON.parse(localStorage.getItem(`brainz-view-${boardId}`) ?? 'null'); }
+        catch { notice('The saved view position could not be read. Opening the canvas at its default view.'); }
+      }
+      localView = Array.isArray(view) && view.length === 3 && view.every(Number.isFinite) && view[2] >= .05 && view[2] <= 10 ? view as [number,number,number] : undefined;
       baseHash = typeof message.baseHash === 'string' ? message.baseHash : undefined;
       agentEnabled = message.agentEnabled === undefined ? agentEnabled : message.agentEnabled === true;
       await load(message.document as BoardDocument|null,message.target as BoardTarget);
@@ -331,7 +353,12 @@ async function receive(message: Record<string,unknown>) {
     case 'canvasRequest': {
       const request = message.request as {requestId:string;kind:string;bound?:number[];objectIds?:string[]};
       try {
-        if (!agent || request.kind !== 'screenshot') throw new Error('This canvas request is unavailable');
+        if (!agent) throw new Error('This canvas request is unavailable');
+        if (request.kind === 'read') {
+          post({type:'canvasResponse',requestId:request.requestId,result:{context:agent.read()}});
+          break;
+        }
+        if (request.kind !== 'screenshot') throw new Error('This canvas request is unavailable');
         let bound = service.viewport.viewportBounds;
         let elements: typeof service.edgelessElements | undefined;
         if (request.objectIds) {
@@ -436,11 +463,11 @@ get('link-form').onsubmit = event => {
   const label=get<HTMLInputElement>('link-title').value.trim() || decodeURIComponent(url.pathname.split('/').pop() || url.hostname || 'Linked item');
   addLink({title:label,url:url.toString()}); dialog.close(); get<HTMLFormElement>('link-form').reset(); get('link-error').textContent='';
 };
-title.oninput = () => { changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = save; saveState.onclick = save;
+title.oninput = () => { changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = flush; saveState.onclick = save;
 window.addEventListener('pointerup',() => { if(saveTimer) save(); });
 window.addEventListener('keyup',() => { if(saveTimer) save(); });
-window.addEventListener('pagehide',save);
-document.addEventListener('visibilitychange',() => { if(document.hidden) save(); });
+window.addEventListener('pagehide',flush);
+document.addEventListener('visibilitychange',() => { if(document.hidden) flush(); });
 window.addEventListener('keydown',event => {
   const editing = event.composedPath().some(node => node instanceof HTMLElement && (node.isContentEditable || ['INPUT','TEXTAREA'].includes(node.tagName)));
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==='s') { event.preventDefault(); save(); return; }
