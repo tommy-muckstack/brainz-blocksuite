@@ -18,6 +18,7 @@ import { CanvasNoteTool, CanvasSelectTool, createNote } from './interactions';
 import { describeScene } from './scene';
 import { CanvasConnectionOverlay, CanvasEditPropsStore } from './canvas-overrides';
 import { CanvasAgent } from './canvas-agent';
+import { CanvasStorage, documentUpdate, hydrateImages } from './storage';
 import expandIcon from './icons/expand.svg?raw';
 import collapseIcon from './icons/collapse.svg?raw';
 
@@ -73,6 +74,7 @@ let service: EdgelessRootService;
 let target: BoardTarget = { path: '/preview/Whiteboard.brainzboard' };
 let links: Y.Map<LinkReference>;
 let images: Record<string,ImageAsset> = {};
+const loadedImages = new Set<string>();
 let revision = 0;
 let savedRevision = 0;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -91,6 +93,20 @@ let boardId: string = crypto.randomUUID();
 let baseHash: string | undefined;
 let localView: [number,number,number] | undefined;
 const pendingResults: {revision:number;message:Record<string,unknown>}[] = [];
+const storage = new CanvasStorage(post);
+let contextTimer: ReturnType<typeof setTimeout> | undefined;
+let warnedLargeBoard = false;
+function checkpoint() {
+  return {snapshot:Y.encodeStateAsUpdate(editor.doc.spaceDoc),usedAssets:service.edgelessElements.flatMap(element=>'sourceId' in element && typeof element.sourceId === 'string' ? [element.sourceId] : [])};
+}
+function scheduleContext() {
+  if (!storage.enabled) return;
+  clearTimeout(contextTimer);
+  contextTimer = setTimeout(() => {
+    const write = () => post({type:'saveContext',context:agent?.read() ?? describeScene(service,links,target,title.value)});
+    if ('requestIdleCallback' in window) window.requestIdleCallback(write,{timeout:1000}); else setTimeout(write,0);
+  },1000);
+}
 
 function notice(message: string) {
   if (message === 'Link copied' && awaitingLinkCopy) {
@@ -140,7 +156,8 @@ function save() {
   if (loading || !service) return;
   revision++;
   saveState.className = 'save-state saving'; saveState.innerHTML = '<i></i>Saving…';
-  post({type:'save', revision, document:snapshot(),baseHash});
+  storage.save(revision,title.value.trim() || 'Untitled canvas',snapshot,baseHash);
+  scheduleContext();
 }
 function changed() {
   if (loading) return;
@@ -180,15 +197,17 @@ function addLink(reference: LinkReference, position?: [number,number]) {
 async function addFile(reference: LinkReference, position: [number,number]) {
   if (!reference.image) { addLink(reference,position); return; }
   const asset = reference.image;
-  if (JSON.stringify(snapshot()).length + asset.data.length > 23*1024*1024) throw new Error('This board is nearly full. Add the image as a file link instead.');
+  if (!storage.enabled && JSON.stringify(snapshot()).length + asset.data.length > 23*1024*1024) throw new Error('This board is nearly full. Enable incremental canvas storage in Labs to add more images.');
   const bytes = base64ToBytes(asset.data);
-  if (bytes.length > 8*1024*1024 || !['image/png','image/jpeg','image/webp','image/gif'].includes(asset.mime)) throw new Error('Use a PNG, JPEG, WebP, or GIF under 8 MB.');
+  const limit = storage.enabled ? 25 : 8;
+  if (bytes.length > limit*1024*1024 || !['image/png','image/jpeg','image/webp','image/gif'].includes(asset.mime)) throw new Error(`Use a PNG, JPEG, WebP, or GIF under ${limit} MB.`);
   const bitmap = await createImageBitmap(new Blob([bytes],{type:asset.mime}));
   const width = Math.min(520,bitmap.width), height = bitmap.height*width/bitmap.width;
   bitmap.close();
-  const sourceId = `image-${collection.idGenerator()}`;
+  const sourceId = storage.enabled ? await storage.putImage(asset,reference.title) : `image-${collection.idGenerator()}`;
   await editor.doc.blobSync.set(sourceId,new Blob([bytes],{type:asset.mime}));
-  images[sourceId] = asset;
+  loadedImages.add(sourceId);
+  if (!storage.enabled) images[sourceId] = asset;
   const id = editor.doc.addBlock('affine:image',{sourceId,size:bytes.length,width,height,xywh:new Bound(...position,width,height).serialize(),caption:reference.title},service.surface);
   links.set(id,{title:reference.title,url:reference.url});
   service.selection.set({elements:[id],editing:false});
@@ -250,11 +269,10 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   const doc = collection.createDoc({id:'canvas'});
   doc.load();
   images = document?.images || {};
-  for (const [id,asset] of Object.entries(images)) await doc.blobSync.set(id,new Blob([base64ToBytes(asset.data)],{type:asset.mime}));
+  await hydrateImages(document,(id,blob)=>doc.blobSync.set(id,blob),loadedImages);
   {
     if (document) {
-      if (document.format !== 'brainz-whiteboard' || document.version !== 1) throw new Error('Unsupported whiteboard file');
-      Y.applyUpdate(doc.spaceDoc,base64ToBytes(document.data));
+      Y.applyUpdate(doc.spaceDoc,documentUpdate(document));
     }
     if (!doc.root) {
        const page = doc.addBlock('affine:page',{title:new Text('Whiteboard')});
@@ -296,7 +314,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   }
   doc.resetHistory();
   service.selection.slots.updated.on(updateSelection);
-  doc.spaceDoc.on('update',changed);
+  doc.spaceDoc.on('update',(update:Uint8Array,origin:unknown) => { storage.changed(update,origin); changed(); });
   service.viewport.viewportUpdated.on(({zoom}) => {
     get('zoom').textContent = `${Math.round(zoom*100)}%`;
     if (!loading && !viewportTimer) viewportTimer = setTimeout(saveView,1000);
@@ -309,7 +327,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   saveState.className = 'save-state'; saveState.innerHTML = '<i></i>Saved locally';
   if (next.object || next.viewport) focusTarget(next);
   if (attachAfterLoad) { attachAfterLoad = false; void attachToChat(); }
-  if (!document || migratedFont) save();
+  if (!document || migratedFont || (storage.enabled && document.version === 1)) save();
   if (document?.viewport && !localView) saveView();
   editor.addEventListener('dblclick',event => {
     const id = service.selection.selectedIds[0];
@@ -343,6 +361,7 @@ async function receive(message: Record<string,unknown>) {
       localView = Array.isArray(view) && view.length === 3 && view.every(Number.isFinite) && view[2] >= .05 && view[2] <= 10 ? view as [number,number,number] : undefined;
       baseHash = typeof message.baseHash === 'string' ? message.baseHash : undefined;
       agentEnabled = message.agentEnabled === undefined ? agentEnabled : message.agentEnabled === true;
+      storage.open(message.document as BoardDocument|null,message.incrementalStorage === true);
       await load(message.document as BoardDocument|null,message.target as BoardTarget);
     } catch (error) { console.error(error); const text=String(error); notice(text); post({type:'error',message:text}); } break;
     case 'ops':
@@ -379,18 +398,16 @@ async function receive(message: Record<string,unknown>) {
     case 'external': {
       try {
         const external = message.document as BoardDocument;
-        if (external.format !== 'brainz-whiteboard' || external.version !== 1) throw new Error('Unsupported external canvas version');
         if (external.id && external.id !== boardId) throw new Error('The file was replaced with a different canvas');
-        const update = base64ToBytes(external.data);
+        const update = documentUpdate(external);
         // Validate the update before touching the open document. Yjs can throw
         // during decoding; a failed external write must never replace live work.
         const probe = new Y.Doc();
         try { Y.applyUpdate(probe,update); } finally { probe.destroy(); }
-        for (const [id,asset] of Object.entries(external.images ?? {})) {
-          if (!images[id]) await editor.doc.blobSync.set(id,new Blob([base64ToBytes(asset.data)],{type:asset.mime}));
-        }
+        await hydrateImages(external,(id,blob)=>editor.doc.blobSync.set(id,blob),loadedImages);
         images = {...external.images,...images};
         Y.applyUpdate(editor.doc.spaceDoc,update,'external');
+        if (external.version === 2 && external.storageStamp) post({type:'externalMerged',stamp:external.storageStamp});
         baseHash = String(message.baseHash); save(); notice('External canvas changes merged');
       } catch (error) {
         console.error(error);
@@ -405,10 +422,14 @@ async function receive(message: Record<string,unknown>) {
     case 'saved':
       if (Number(message.revision) >= savedRevision && typeof message.baseHash === 'string') baseHash = message.baseHash;
       savedRevision = Math.max(savedRevision,Number(message.revision));
-      if (savedRevision >= revision && !saveTimer) { saveState.className='save-state'; saveState.innerHTML='<i></i>Saved locally'; }
+      storage.saved(Number(message.revision),message.storage as {version?:number;stamp?:string;needsCompaction?:boolean}|undefined,savedRevision >= revision && !saveTimer ? checkpoint : undefined);
+      if ((message.storage as {version?:number})?.version === 2) images = {};
+      if (!warnedLargeBoard && Number((message.storage as {assetBytes?:number})?.assetBytes) >= 200*1024*1024) { warnedLargeBoard = true; notice('This canvas contains over 200 MB of images. Removing unused images can help it open faster.'); }
+      if (savedRevision >= revision && !saveTimer) { saveState.className='save-state'; saveState.innerHTML='<i></i>Saved locally'; saveState.title=`Last saved ${new Date().toLocaleTimeString()}`; }
       while (pendingResults[0] && pendingResults[0].revision <= savedRevision) post(pendingResults.shift()!.message);
       if (savedRevision < revision && !saveTimer) saveTimer = setTimeout(save,0);
       break;
+    case 'assetStored': storage.assetStored(message); break;
     case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
     case 'notice': notice(String(message.message)); break;
     case 'files': {
@@ -466,7 +487,7 @@ get('link-form').onsubmit = event => {
 title.oninput = () => { changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = flush; saveState.onclick = save;
 window.addEventListener('pointerup',() => { if(saveTimer) save(); });
 window.addEventListener('keyup',() => { if(saveTimer) save(); });
-window.addEventListener('pagehide',flush);
+window.addEventListener('pagehide',() => { flush(); if (!loading && savedRevision >= revision) storage.checkpoint(checkpoint); });
 document.addEventListener('visibilitychange',() => { if(document.hidden) flush(); });
 window.addEventListener('keydown',event => {
   const editing = event.composedPath().some(node => node instanceof HTMLElement && (node.isContentEditable || ['INPUT','TEXTAREA'].includes(node.tagName)));
