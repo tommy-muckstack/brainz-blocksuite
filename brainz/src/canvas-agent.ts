@@ -222,6 +222,7 @@ export class CanvasAgent {
       doc.spaceDoc.transact(() => {
         for (const id of changed) {
           if (service.getElementById(id)) this.metadata.set(id, {
+            ...this.metadata.get(id),
             createdBy: this.metadata.get(id)?.createdBy ?? plan.batch.actor, updatedBy: plan.batch.actor,
             at, opId: `${plan.batch.batchId}:${id}`, batchId: plan.batch.batchId,
           });

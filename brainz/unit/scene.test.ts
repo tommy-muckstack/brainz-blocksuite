@@ -12,9 +12,9 @@ function element(id: string, properties: Record<string, unknown> = {}) {
   return { id, type: 'shape', text: '', elementBound: { x: 20, y: 40, w: 160, h: 100 }, rotate: 0, index: 'a0', ...properties };
 }
 
-function scene(elements: unknown[], links = new Map()) {
+function scene(elements: unknown[], links = new Map(), metadata = new Map()) {
   return describeScene(
-    { edgelessElements: elements, viewport: { centerX: 0, centerY: 0 }, zoom: 1 } as Parameters<typeof describeScene>[0],
+    { edgelessElements: elements, viewport: { centerX: 0, centerY: 0 }, zoom: 1, std: {doc:{spaceDoc:{getMap:()=>metadata}}} } as Parameters<typeof describeScene>[0],
     links as Parameters<typeof describeScene>[1],
     { path: '/brain/Projects/flow.brainzboard' }, 'Workflow',
   );
@@ -40,9 +40,10 @@ describe('AI canvas context', () => {
     const note = element('note', { flavour: 'affine:note', text: 'Heading', children: [{ text: 'Details', children: [] }] });
     const image = element('image', { flavour: 'affine:image', sourceId: 'asset123', caption: 'Architecture', children: [], group: { id: 'group' } });
     const group = Object.assign(new GroupElementModel(), element('group', { type: 'group', childElements: [image] }));
-    const result = scene([note, image, group], new Map([['image', { title: 'Diagram', url: 'file:///brain/diagram.png' }]]));
+    const result = scene([note, image, group], new Map([['image', { title: 'Diagram', url: 'file:///brain/diagram.png' }]]), new Map([['image',{ocr:'Approval required'}]]));
     expect(result.objects[0]?.text).toBe('Heading\nDetails');
     expect(result.objects[1]).toMatchObject({ kind: 'image', caption: 'Architecture', image: { assetId: 'asset123', original: 'file:///brain/diagram.png' }, group: 'group' });
+    expect(result.objects[1]?.image?.ocr).toBe('Approval required');
     expect(result.objects[2]?.children).toEqual(['image']);
     expect(new URL(result.objects[1]!.deepLink).searchParams.get('object')).toBe('image');
     expect(result.connections).toEqual([]);

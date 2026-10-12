@@ -23,7 +23,7 @@ export function describeScene(service: EdgelessRootService, links: Y.Map<LinkRef
       rotation: element.rotate, layer: element.index,
       shape: 'shapeType' in element ? element.shapeType : undefined,
       caption: 'caption' in element ? element.caption : undefined,
-      image: 'sourceId' in element ? { assetId: element.sourceId, original: reference?.url } : undefined,
+      image: 'sourceId' in element ? { assetId: element.sourceId, original: reference?.url, ocr: service.std.doc.spaceDoc.getMap<{ocr?:string}>('brainz:meta').get(element.id)?.ocr } : undefined,
       link: reference ? { title: reference.title, url: reference.url } : undefined,
       group: element.group?.id,
       children: element instanceof GroupElementModel ? element.childElements.map(child => child.id) : undefined,

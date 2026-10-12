@@ -19,8 +19,9 @@ import { describeScene } from './scene';
 import { CanvasConnectionOverlay, CanvasEditPropsStore } from './canvas-overrides';
 import { CanvasAgent } from './canvas-agent';
 import { CanvasStorage, documentUpdate, hydrateImages } from './storage';
-import expandIcon from './icons/expand.svg?raw';
-import collapseIcon from './icons/collapse.svg?raw';
+import { icon, mountShell } from './shell';
+import { CanvasTools } from './tools';
+import { installPaste } from './paste';
 
 declare global {
   interface Window { ipc?: { postMessage(message: string): void }; __brainzBoard?: unknown }
@@ -29,37 +30,7 @@ blockEffects();
 presetEffects();
 const native = Boolean(window.ipc);
 const app = document.querySelector<HTMLDivElement>('#app')!;
-const paths: Record<string, string> = {
-  canvas: 'M12 16V21M12 16L18 21M12 16L6 21M21 3V11.2C21 12.8802 21 13.7202 20.673 14.362C20.3854 14.9265 19.9265 15.3854 19.362 15.673C18.7202 16 17.8802 16 16.2 16H7.8C6.11984 16 5.27976 16 4.63803 15.673C4.07354 15.3854 3.6146 14.9265 3.32698 14.362C3 13.7202 3 12.8802 3 11.2V3M8 9V12M12 7V12M16 11V12M22 3H2',
-  capture: 'M8 3H4a1 1 0 0 0-1 1v4M16 3h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4M21 16v4a1 1 0 0 1-1 1h-4M8 8h8v8H8Z',
-  pointer: 'M5 3L19 12L12 13L9 20Z',
-  hand: 'M8 12V6a2 2 0 0 1 4 0v5V4a2 2 0 0 1 4 0v7V7a2 2 0 0 1 4 0v7c0 5-3 7-7 7-3 0-5-2-7-5l-3-4a2 2 0 0 1 3-2l2 2',
-  box: 'M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
-  note: 'M14 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9l-7 7ZM14 21v-5a2 2 0 0 1 2-2h5',
-  connector: 'M4 18V8a2 2 0 0 1 2-2h14M16 2l4 4-4 4M2 18h4v4H2Z',
-  text: 'M4 5V3h16v2M12 3v18M8 21h8',
-  pen: 'M4 20l4-1L20 7a2 2 0 0 0-3-3L5 16l-1 4ZM14 7l3 3',
-  check: 'M5 12l4 4L19 6',
-  link: 'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2',
-  file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6M8 13h8M8 17h5',
-  undo: 'M3 9h12a6 6 0 0 1 0 12M3 9l5-5M3 9l5 5',
-  redo: 'M21 9H9a6 6 0 0 0 0 12M21 9l-5-5M21 9l-5 5',
-  fit: 'M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M8 8h8v8H8Z',
-  plus: 'M12 5v14M5 12h14', minus: 'M5 12h14',
-  arrow: 'M7 17L17 7M7 7h10v10', close: 'M6 6l12 12M18 6L6 18',
-};
-const icon = (name: string) => name === 'fit' ? expandIcon : name === 'collapse' ? collapseIcon : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name]}"/></svg>`;
-const tool = (name: string, label: string, shortcut: string) => `<button class="tool" data-tool="${name}" aria-label="${label}" aria-pressed="false" title="${label} (${shortcut})">${icon(name)}<span class="tooltip">${label}<kbd>${shortcut}</kbd></span></button>`;
-app.innerHTML = `
-<header class="topbar"><div class="board-name">${icon('canvas')}<input id="title" aria-label="Board name" value="Untitled canvas" maxlength="120"><span class="save-state" id="save-state" role="status"><i></i>Opening…</span></div><div class="header-actions"><button id="add-file" class="text-button">${icon('file')}Add file</button><button id="copy-view" class="text-button share">${icon('link')}Copy link</button></div></header>
-<main id="canvas" aria-label="Infinite whiteboard"></main>
-<div class="empty-state" id="empty"><div class="empty-symbol">${icon('canvas')}</div><h1>A little room to think.</h1><p>Map an idea. Connect the dots.<br>Bring your notes into the picture.</p><button id="first-note" class="primary">${icon('plus')}Add your first note</button><span>or drop a file anywhere</span></div>
-<nav class="tools" aria-label="Drawing tools">${tool('pointer','Select','V')}${tool('hand','Pan','H')}<div class="rule"></div>${tool('note','Sticky note','N')}${tool('box','Box','R')}${tool('connector','Connector','C')}${tool('text','Text','T')}${tool('pen','Draw','P')}<div class="rule"></div><button id="add-link" class="tool" aria-label="Add link" title="Add a Brainz, My Man, or web link">${icon('link')}</button><div class="rule"></div><button id="capture" class="tool" aria-label="Capture area" aria-pressed="false" title="Drag an area to copy as an image">${icon('capture')}<span class="tooltip">Capture area</span></button></nav>
-<div class="selection-bar" id="selection" hidden><span id="selection-title"></span><button id="open-object" class="text-button" hidden>${icon('arrow')}Open</button><button id="copy-object" class="text-button">${icon('link')}Copy object link</button></div>
-<div class="bottom-left"><div class="history"><button id="undo" aria-label="Undo" title="Undo (⌘Z)">${icon('undo')}</button><button id="redo" aria-label="Redo" title="Redo (⇧⌘Z)">${icon('redo')}</button></div><span class="hint">Space + drag to pan<span>·</span>Pinch to zoom</span></div>
-<div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">${icon('minus')}</button><button id="zoom-reset" aria-label="Reset zoom"><span id="zoom">100%</span></button><button id="zoom-in" aria-label="Zoom in">${icon('plus')}</button><span></span><button id="fit" aria-label="Fit to content" title="Fit to content (⇧1)">${icon('fit')}</button></div>
-<div id="toast" role="status" hidden></div>
-<dialog id="link-dialog"><form id="link-form"><div class="dialog-title"><h2>Add a link</h2><button type="button" id="cancel-link" aria-label="Close">${icon('close')}</button></div><p>Connect something from Brainz, My Man, or the web.</p><label>Link<input id="link-url" type="text" placeholder="brainz://… or https://…" required autocomplete="off"></label><label>Label<input id="link-title" type="text" placeholder="Give it a name" maxlength="160"></label><div id="link-error" role="alert"></div><button class="primary" type="submit">Add to canvas</button></form></dialog>`;
+mountShell(app);
 for (const [property, value] of Object.entries(combinedDarkCssVariables)) document.documentElement.style.setProperty(property, String(value));
 const themeOverrides: Record<string,string> = {'--affine-font-family':'Brainz Canvas, Gellix, sans-serif','--affine-background-primary-color':'#141413','--affine-background-secondary-color':'#22221f','--affine-background-overlay-panel-color':'#282823','--affine-text-primary-color':'#e5e3da','--affine-text-secondary-color':'#99988e','--affine-primary-color':'#e2c76b','--affine-border-color':'#3b3b34','--affine-hover-color':'#d8c87a26','--affine-tooltip':'#2e2e28'};
 for (const [key, value] of Object.entries(themeOverrides)) document.documentElement.style.setProperty(key,value);
@@ -71,6 +42,7 @@ const dialog = get<HTMLDialogElement>('link-dialog');
 let editor: EdgelessEditor;
 let collection: DocCollection;
 let service: EdgelessRootService;
+let canvasTools: CanvasTools | undefined;
 let target: BoardTarget = { path: '/preview/Whiteboard.brainzboard' };
 let links: Y.Map<LinkReference>;
 let images: Record<string,ImageAsset> = {};
@@ -167,18 +139,10 @@ function changed() {
 }
 function updateEmpty() { if (service) get('empty').hidden = service.edgelessElements.length > 0; }
 function selectTool(name: string) {
-  if (!service) return;
-  const controller = editor.std.get(ToolController);
-  switch (name) {
-    case 'pointer': controller.setTool('default'); service.selection.set({elements:service.selection.selectedIds,editing:false}); window.getSelection()?.removeAllRanges(); break;
-    case 'hand': controller.setTool('pan',{panning:false}); break;
-    case 'box': controller.setTool('shape',{shapeName:'roundedRect'}); break;
-    case 'note': controller.setTool('affine:note',{childFlavour:'affine:paragraph',childType:'text',tip:'Write something…'}); break;
-    case 'connector': controller.setTool('connector',{mode:ConnectorMode.Orthogonal}); break;
-    case 'text': controller.setTool('text'); break;
-    case 'pen': controller.setTool('brush'); break;
-  }
+  if (canvasTools) canvasTools.select(name);
+  else if (service && name === 'pointer') editor.std.get(ToolController).setTool('default');
 }
+
 function addNote() {
   const [x,y] = service.viewport.toViewCoord(service.viewport.centerX-110,service.viewport.centerY-60);
   createNote(editor.std,new Point(x,y));
@@ -209,9 +173,10 @@ async function addFile(reference: LinkReference, position: [number,number]) {
   loadedImages.add(sourceId);
   if (!storage.enabled) images[sourceId] = asset;
   const id = editor.doc.addBlock('affine:image',{sourceId,size:bytes.length,width,height,xywh:new Bound(...position,width,height).serialize(),caption:reference.title},service.surface);
-  links.set(id,{title:reference.title,url:reference.url});
+  if (reference.url) links.set(id,{title:reference.title,url:reference.url});
   service.selection.set({elements:[id],editing:false});
   selectTool('pointer'); save(); updateEmpty();
+  if (native) post({type:'recognizeImage',objectId:id,sourceId,data:asset.data,mime:asset.mime});
 }
 
 async function attachToChat() {
@@ -298,12 +263,6 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   defaults.recordLastProps('connector',{stroke:{normal:'#a8b59a'},strokeWidth:2});
   title.value = document?.title || 'Untitled canvas';
   links = doc.spaceDoc.getMap<LinkReference>('brainz:links');
-  const controller = editor.std.get(ToolController);
-  controller.currentToolName$.subscribe(name => {
-    const mapped:Record<string,string> = {'default':'pointer','pan':'hand','shape':'box','affine:note':'note','connector':'connector','text':'text','brush':'pen'};
-    documentButtons().forEach(button => button.setAttribute('aria-pressed',String(button.dataset.tool === mapped[String(name)])));
-    editor.std.get(OverlayIdentifier('connection')).refresh();
-  });
   const migrations = doc.spaceDoc.getMap<number>('brainz:migrations');
   const migratedFont = migrations.get('canvas-font') !== 1;
   if (migratedFont) {
@@ -343,10 +302,19 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     toggle.onchange = () => { if (agent) { agent.allowDirect = toggle.checked; save(); } };
     label.append(toggle, 'Allow direct agent edits'); get('canvas-menu').querySelector('[role="menu"]')!.append(label);
   }
-  if (import.meta.env.DEV) window.__brainzBoard = {editor,service,collection,links,addNote,addLink,snapshot,focusTarget,agent,Y};
+  canvasTools = new CanvasTools(editor,service,save,()=>[
+    {id:'add-file',label:'Add a file or image',group:'Insert',run:()=>post({type:'pickFiles'})},
+    {id:'add-link',label:'Add a link',group:'Insert',run:()=>get('add-link').click()},
+    {id:'capture',label:'Copy a canvas area as PNG',group:'View',run:()=>get('capture').click()},
+    {id:'copy-link',label:'Copy canvas link',group:'Board',run:()=>get('copy-view').click()},
+    {id:'new-canvas',label:'New canvas',group:'Board',run:()=>get('new-canvas').click()},
+    {id:'move-canvas',label:'Move canvas to folder',group:'Board',run:()=>get('move-canvas').click()},
+    {id:'save',label:'Save canvas',group:'Board',keys:'⌘S',run:save},
+  ]);
+  installPaste(editor,service,addFile,addLink,notice);
+  if (import.meta.env.DEV) window.__brainzBoard = {editor,service,collection,links,addNote,addLink,snapshot,focusTarget,agent,Y,canvasTools};
   post({type:'loaded'});
 }
-function documentButtons() { return document.querySelectorAll<HTMLButtonElement>('[data-tool]'); }
 async function receive(message: Record<string,unknown>) {
   switch (message.type) {
     case 'load': try {
@@ -430,6 +398,14 @@ async function receive(message: Record<string,unknown>) {
       if (savedRevision < revision && !saveTimer) saveTimer = setTimeout(save,0);
       break;
     case 'assetStored': storage.assetStored(message); break;
+    case 'imageText': {
+      const object=service.getElementById(String(message.objectId));
+      if (object && 'sourceId' in object && object.sourceId===message.sourceId && typeof message.text==='string' && message.text.trim()) {
+        const metadata=editor.doc.spaceDoc.getMap<Record<string,unknown>>('brainz:meta');
+        metadata.set(object.id,{...metadata.get(object.id),ocr:message.text.slice(0,100000)});
+      }
+      break;
+    }
     case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
     case 'notice': notice(String(message.message)); break;
     case 'files': {
@@ -445,7 +421,6 @@ async function receive(message: Record<string,unknown>) {
   }
 }
 window.addEventListener('brainz',event => { void receive((event as CustomEvent).detail); });
-documentButtons().forEach(button => button.addEventListener('click',() => selectTool(button.dataset.tool!)));
 get('first-note').onclick = addNote;
 get('undo').onclick = () => { editor?.doc.undo(); updateEmpty(); };
 get('redo').onclick = () => { editor?.doc.redo(); updateEmpty(); };
@@ -489,20 +464,6 @@ window.addEventListener('pointerup',() => { if(saveTimer) save(); });
 window.addEventListener('keyup',() => { if(saveTimer) save(); });
 window.addEventListener('pagehide',() => { flush(); if (!loading && savedRevision >= revision) storage.checkpoint(checkpoint); });
 document.addEventListener('visibilitychange',() => { if(document.hidden) flush(); });
-window.addEventListener('keydown',event => {
-  const editing = event.composedPath().some(node => node instanceof HTMLElement && (node.isContentEditable || ['INPUT','TEXTAREA'].includes(node.tagName)));
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase()==='s') { event.preventDefault(); save(); return; }
-  if (editing || dialog.open || event.metaKey || event.ctrlKey || event.altKey) return;
-  if (event.shiftKey && event.key==='!') { event.preventDefault(); service?.zoomToFit(); return; }
-  const keys:Record<string,string>={v:'pointer',h:'hand',n:'note',r:'box',c:'connector',t:'text',p:'pen'};
-  const name=keys[event.key.toLowerCase()]; if(name) { event.preventDefault(); event.stopImmediatePropagation(); selectTool(name); }
-},true);
-document.addEventListener('paste',event => {
-  if (event.clipboardData?.files.length) { event.preventDefault(); event.stopImmediatePropagation(); notice('Use Add file to keep a link to the original file.'); return; }
-  if (event.composedPath().some(node => node instanceof HTMLElement && (node.isContentEditable || ['INPUT','TEXTAREA'].includes(node.tagName)))) return;
-  const value=event.clipboardData?.getData('text/plain').trim();
-  if (value && supportedLink(value)) { event.preventDefault(); event.stopImmediatePropagation(); const url=new URL(value); addLink({title:decodeURIComponent(url.pathname.split('/').pop() || url.hostname),url:value}); }
-},true);
 get('canvas').addEventListener('dragover',event => event.preventDefault());
 get('canvas').addEventListener('drop',event => {
   const value=event.dataTransfer?.getData('text/uri-list').split('\n').find(line=>line && !line.startsWith('#')) || event.dataTransfer?.getData('text/plain');
