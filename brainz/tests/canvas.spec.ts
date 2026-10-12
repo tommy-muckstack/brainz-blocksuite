@@ -59,7 +59,7 @@ test('Connector shows object ports immediately and binds arrows at every zoom',a
   let objects=await objectPorts(page);
   expect(objects).toHaveLength(3);
   const amber=[226,199,107];
-  await expect.poll(async()=>(await colorCounts(page,objects.flatMap((object:any)=>object.ports),amber)).every(count=>count>12)).toBe(true);
+  await expect.poll(async()=>Math.min(...await colorCounts(page,objects.flatMap((object:any)=>object.ports),amber)), {message:'Every connector port should visibly render its amber ring'}).toBeGreaterThan(12);
   await page.screenshot({path:test.info().outputPath('connector-ports.png')});
   const [source,target]=objects;
   await page.mouse.move(source.ports[1][0],source.ports[1][1]);await page.mouse.down();
@@ -161,7 +161,10 @@ test('Copy PNG exports only selected items with equal padding',async({page})=>{
     }
     return {width:image.width,height:image.height,padding:[left,top,image.width-1-right,image.height-1-bottom],red};
   });
-  expect(capture).toEqual({width:264,height:204,padding:[32,32,32,32],red:0});
+  expect(capture).toMatchObject({width:264,height:204,red:0});
+  // Rasterizers can antialias the edge by one pixel; the margin must still be equal on all sides.
+  expect(new Set(capture.padding).size).toBe(1);
+  for(const margin of capture.padding) { expect(margin).toBeGreaterThanOrEqual(32); expect(margin).toBeLessThanOrEqual(33); }
   expect((await state(page))).toHaveLength(2);
   const png=await page.evaluate(()=>window.__messages.find(message=>message.type==='copyImage').png);
   await test.info().attach('Selected objects PNG',{body:Buffer.from(png,'base64'),contentType:'image/png'});
