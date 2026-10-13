@@ -33,5 +33,19 @@ Copy PNG in the selection toolbar exports selected objects and their descendants
 with even padding, excluding nearby unselected objects. `canvas-overrides.ts`
 adapts the pinned engine's connection overlay and transparent-color style cache.
 
+The rail supports single-key tools, repeat locking with Q, and a searchable
+command menu (Command-K). Right-click uses the same command registry; ? shows
+shortcuts. Sticky notes continue with Tab or Shift-Tab and finish with
+Command-Enter. Text sizing defaults to Auto and can be changed in the selection
+toolbar. Quick-create dots and the drop picker create attached, editable objects.
+
+`npm ci` applies the reviewed compatibility patches in
+`scripts/engine-patches.json`. The installer verifies the exact upstream hashes
+before touching package files, keeps originals, and refuses unknown changes.
+The patches retain BlockSuite's placement and preview engine while exposing
+Brainz creation hooks, keyboard choices, amber snapping, and rounded connectors.
+Changing the pinned engine requires reviewing these patches. Vite keys its
+dependency cache by the patch contents.
+
 The integration is licensed under MPL-2.0; see the root LICENSE. Dependency
 licenses remain with their respective packages.

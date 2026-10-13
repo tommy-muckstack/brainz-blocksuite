@@ -22,6 +22,9 @@ import { CanvasStorage, documentUpdate, hydrateImages } from './storage';
 import { icon, mountShell } from './shell';
 import { CanvasTools } from './tools';
 import { installPaste } from './paste';
+import { installSelectionActions, installStickySizing } from './selection';
+import type { CanvasCommand } from './commands';
+import { installQuickCreate } from './quick-create';
 
 declare global {
   interface Window { ipc?: { postMessage(message: string): void }; __brainzBoard?: unknown }
@@ -203,13 +206,11 @@ async function attachToChat() {
   } catch(error) { console.error(error); notice(`Could not attach canvas: ${error instanceof Error ? error.message : String(error)}`); }
   finally { attaching = false; }
 }
-function updateSelection() {
-  const ids = service.selection.selectedIds;
-  get('selection').hidden = ids.length === 0 || service.selection.editing;
-  const reference = ids.length === 1 ? links.get(ids[0]) : undefined;
-  get('selection-title').textContent = reference?.title || `${ids.length} ${ids.length === 1 ? 'object' : 'objects'} selected`;
-  get('open-object').hidden = !reference;
-  get<HTMLButtonElement>('copy-object').disabled = ids.length !== 1;
+function selectionCommands():CanvasCommand[] {
+  return [
+    {id:'copy-object',label:'Copy object link',group:'Board',when:()=>service.selection.selectedIds.length===1,run:()=>{const id=service.selection.selectedIds[0];if(id)post({type:'copy',text:boardLink(target,viewport(),id)});}},
+    {id:'open-object',label:'Open linked file',group:'Brainz',when:()=>service.selection.selectedIds.length===1 && links.has(service.selection.selectedIds[0]),run:()=>{const reference=links.get(service.selection.selectedIds[0]);if(reference)post({type:'open',url:reference.url});}},
+  ];
 }
 function focusTarget(next: BoardTarget) {
   if (!service) return;
@@ -219,7 +220,7 @@ function focusTarget(next: BoardTarget) {
       service.selection.set({elements:[next.object],editing:false});
       const bound = element.elementBound;
       service.viewport.setViewportByBound(bound, [120,160,120,160], true);
-      updateSelection(); return;
+      return;
     }
     notice('This object is no longer on the board.');
   }
@@ -272,7 +273,6 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     migrations.set('canvas-font',1);
   }
   doc.resetHistory();
-  service.selection.slots.updated.on(updateSelection);
   doc.spaceDoc.on('update',(update:Uint8Array,origin:unknown) => { storage.changed(update,origin); changed(); });
   service.viewport.viewportUpdated.on(({zoom}) => {
     get('zoom').textContent = `${Math.round(zoom*100)}%`;
@@ -303,6 +303,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     label.append(toggle, 'Allow direct agent edits'); get('canvas-menu').querySelector('[role="menu"]')!.append(label);
   }
   canvasTools = new CanvasTools(editor,service,save,()=>[
+    ...selectionCommands(),
     {id:'add-file',label:'Add a file or image',group:'Insert',run:()=>post({type:'pickFiles'})},
     {id:'add-link',label:'Add a link',group:'Insert',run:()=>get('add-link').click()},
     {id:'capture',label:'Copy a canvas area as PNG',group:'View',run:()=>get('capture').click()},
@@ -311,6 +312,9 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     {id:'move-canvas',label:'Move canvas to folder',group:'Board',run:()=>get('move-canvas').click()},
     {id:'save',label:'Save canvas',group:'Board',keys:'⌘S',run:save},
   ]);
+  installSelectionActions(editor,service,selectionCommands);
+  installStickySizing(editor,service);
+  installQuickCreate(editor,service);
   installPaste(editor,service,addFile,addLink,notice);
   if (import.meta.env.DEV) window.__brainzBoard = {editor,service,collection,links,addNote,addLink,snapshot,focusTarget,agent,Y,canvasTools};
   post({type:'loaded'});
@@ -443,15 +447,15 @@ get('copy-view').onclick = () => {
   awaitingLinkCopy = true;
   post({type:'copy',text:boardLink(target,viewport())});
 };
-get('copy-object').onclick = () => { const id=service.selection.selectedIds[0]; if(id) post({type:'copy',text:boardLink(target,viewport(),id)}); };
-get('open-object').onclick = () => { const reference=links.get(service.selection.selectedIds[0]); if(reference) post({type:'open',url:reference.url}); };
 get('add-file').onclick = () => post({type:'pickFiles'});
 for (const [id, type] of [['new-canvas','newCanvas'],['move-canvas','moveCanvas']]) {
   get(id).onclick = () => { get<HTMLDetailsElement>('canvas-menu').open = false; save(); post({type}); };
 }
 document.addEventListener('pointerdown',event => { if (!event.composedPath().includes(get('canvas-menu'))) get<HTMLDetailsElement>('canvas-menu').open = false; });
-get('add-link').onclick = () => { dialog.showModal(); get<HTMLInputElement>('link-url').focus(); };
-get('cancel-link').onclick = () => dialog.close();
+get('add-link').onclick = () => { dialog.show(); get<HTMLInputElement>('link-url').focus(); };
+get('cancel-link').onclick = () => { dialog.close(); get('add-link').focus(); };
+document.addEventListener('pointerdown',event=>{if(dialog.open && !event.composedPath().includes(dialog) && !event.composedPath().includes(get('add-link')))dialog.close();},true);
+dialog.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();dialog.close();get('add-link').focus();}});
 get('link-form').onsubmit = event => {
   event.preventDefault(); const value=get<HTMLInputElement>('link-url').value.trim();
   const url=supportedLink(value);

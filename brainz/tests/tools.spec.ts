@@ -82,3 +82,70 @@ test('Pasting a screenshot creates a persistent image with locally recognized te
   await expect(page.locator('affine-edgeless-image img')).toBeVisible();
   expect(await page.evaluate(()=>(window.__brainzBoard as any).agent.read().objects.find((object:any)=>object.kind==='image')?.image?.ocr)).toBe('Text from the screenshot');
 });
+
+test('Quick-create dots connect new shapes and stickies, focus text, and offer keyboard choices after a drag',async({page})=>{
+  await open(page);
+  await page.keyboard.press('n');await page.mouse.click(330,240);await page.keyboard.type('First');await page.keyboard.press('Meta+Enter');
+  const right=page.getByRole('button',{name:'Add connected object right',exact:true});
+  await expect(right).toBeVisible();
+  await expect(page.locator('edgeless-auto-complete .edgeless-auto-complete-arrow')).toHaveCount(4);
+  await right.click();await page.keyboard.type('Second');
+  await expect.poll(()=>page.evaluate(()=>{const {service}=window.__brainzBoard as any;return service.edgelessElements.filter((element:any)=>element.flavour==='affine:note').map((note:any)=>note.children.map((child:any)=>child.text?.toString()??'').join(''));})).toEqual(['First','Second']);
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='connector' && element.source.id && element.target.id).length)).toBe(1);
+  await page.keyboard.press('Meta+Enter');
+  const below=page.getByRole('button',{name:'Add connected object below',exact:true});const bounds=await below.boundingBox();
+  await page.mouse.move(bounds!.x+bounds!.width/2,bounds!.y+bounds!.height/2);await page.mouse.down();await page.mouse.move(bounds!.x+100,bounds!.y+160,{steps:12});await page.mouse.up();
+  await expect(page.locator('edgeless-auto-complete-panel .auto-complete-panel-container')).toBeVisible();await page.keyboard.press('6');
+  await page.keyboard.type('Decision');
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.text?.toString())).toBe('Decision');
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.shapeType)).toBe('diamond');
+  await page.keyboard.press('Escape');await page.screenshot({path:test.info().outputPath('quick-create.png')});
+  await page.locator('#save-state').click();await expect(page.locator('#save-state')).toContainText('Saved');await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.text?.toString())).toBe('Decision');
+});
+
+test('Sticky Auto sizing keeps its bounds, persists explicit sizing, and restores it on reopen',async({page})=>{
+  await open(page);await page.keyboard.press('n');await page.mouse.click(400,280);await page.keyboard.type('A longer sticky note. '.repeat(24));await page.keyboard.press('Meta+Enter');
+  const note=page.locator('affine-edgeless-note');
+  await expect.poll(()=>note.evaluate(element=>parseFloat(getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size')))).toBeLessThan(28);
+  expect(await note.evaluate((element:any)=>JSON.parse(element.model.xywh).slice(2))).toEqual([280,200]);
+  await page.getByRole('combobox',{name:'Sticky text size'}).selectOption('14');
+  await expect.poll(()=>note.evaluate(element=>getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size'))).toBe('14px');
+  await page.locator('#save-state').click();await expect(page.locator('#save-state')).toContainText('Saved');await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await expect.poll(()=>note.evaluate(element=>getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size'))).toBe('14px');
+});
+
+test('Selection actions use one toolbar and links stay nonmodal; shortcuts and context menu share commands',async({page})=>{
+  await open(page);
+  await page.locator('#add-link').click();await page.locator('#link-url').fill('brainz://open?path=%2Fbrain%2FPlan.md');await page.locator('#link-title').fill('Plan');
+  expect(await page.locator('#link-dialog').evaluate(element=>element.matches(':modal'))).toBe(false);
+  await page.getByRole('button',{name:'Add to canvas',exact:true}).click();
+  await expect(page.locator('.selection-bar')).toHaveCount(0);
+  await page.keyboard.press('Meta+k');await page.getByRole('combobox',{name:'Find a canvas command'}).fill('Open linked');await page.keyboard.press('Enter');
+  expect(await page.evaluate(()=>(window as any).__messages.some((message:any)=>message.type==='open' && message.url.includes('Plan.md')))).toBe(true);
+  await page.keyboard.press('?');await expect(page.getByRole('dialog',{name:'Canvas shortcuts'})).toBeVisible();await page.keyboard.press('Escape');
+  await page.mouse.click(700,550,{button:'right'});await expect(page.locator('.canvas-command-panel')).toHaveAttribute('data-mode','context');
+  await page.getByRole('combobox',{name:'Find a canvas command'}).fill('laser');await page.keyboard.press('Enter');await expect(page.locator('#canvas-laser')).toBeVisible();
+});
+
+test('Quick-created shapes copy their style, keep original labels, and undo the new shape and connector together',async({page})=>{
+  await open(page);await page.keyboard.press('r');await page.mouse.move(300,240);await page.mouse.down();await page.mouse.move(490,360,{steps:8});await page.mouse.up();await page.keyboard.type('Start');await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Add connected object right',exact:true}).click();await page.keyboard.type('Next');await page.keyboard.press('Escape');
+  const shapes=await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').map((element:any)=>({id:element.id,text:element.text?.toString(),fill:element.fillColor,font:element.fontFamily})));
+  expect(shapes.map((shape:any)=>shape.text)).toEqual(['Start','Next']);expect(shapes[0].id).not.toBe(shapes[1].id);expect(shapes[1].fill).toEqual(shapes[0].fill);expect(shapes[1].font).toBe(shapes[0].font);
+  await page.locator('#undo').click();await page.locator('#undo').click();
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.length)).toBe(1);
+});
+
+test('Connectors bind inside a box and reroute before the drag ends; Command disables alignment snapping',async({page})=>{
+  await open(page);
+  for(const [x,y] of [[330,240],[730,360]]) {await page.getByRole('button',{name:'Box',exact:true}).click();await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+180,y+100,{steps:8});await page.mouse.up();}
+  await page.getByRole('button',{name:'Connector',exact:true}).click();await page.mouse.move(420,290);await page.mouse.down();await page.mouse.move(815,410,{steps:12});await page.mouse.up();
+  const original=await page.evaluate(()=>{const element=(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='connector');return {source:element.source,target:element.target,path:element.absolutePath.map((point:any)=>[point[0],point[1]])};});
+  expect(original.source.id).toBeTruthy();expect(original.target.id).toBeTruthy();
+  await page.getByRole('button',{name:'Select',exact:true}).click();await page.mouse.move(810,400);await page.mouse.down();await page.keyboard.down('Meta');await page.mouse.move(858,496,{steps:12});
+  expect(await page.evaluate(()=>globalThis.__brainzSuppressSnap)).toBe(true);
+  const during=await page.evaluate(()=>{const element=(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='connector');return {source:element.source,target:element.target,path:element.absolutePath.map((point:any)=>[point[0],point[1]])};});
+  expect(during.source.id).toBe(original.source.id);expect(during.target.id).toBe(original.target.id);expect(during.path).not.toEqual(original.path);
+  await page.mouse.up();await page.keyboard.up('Meta');expect(await page.evaluate(()=>globalThis.__brainzSuppressSnap)).toBe(false);
+});

@@ -1,0 +1,124 @@
+[
+  {
+    "file": "dist/root-block/edgeless/components/auto-complete/edgeless-auto-complete.js",
+    "originalHash": "d2fd1d80e4a01116e6c2779500f4aaca9cb775984dd1884cae1db503aeaa7896",
+    "replacements": [
+      {
+        "find": "        _generateElementOnClick(type) {\n            const { doc, service } = this.edgeless;\n            const bound = this._computeNextBound(type);\n            const id = createEdgelessElement(this.edgeless, this.current, bound);\n            if (isShape(this.current)) {\n                const { startPosition, endPosition } = getPosition(type);\n                this._addConnector({\n                    id: this.current.id,\n                    position: startPosition,\n                }, {\n                    id,\n                    position: endPosition,\n                });\n                mountShapeTextEditor(service.getElementById(id), this.edgeless);\n            }\n            else {\n                const model = doc.getBlockById(id);\n                assertExists(model);\n                const [x, y] = service.viewport.toViewCoord(bound.center[0], bound.y + DEFAULT_NOTE_HEIGHT / 2);\n                requestAnimationFrame(() => {\n                    handleNativeRangeAtPoint(x, y);\n                });\n            }\n            this.edgeless.service.selection.set({\n                elements: [id],\n                editing: true,\n            });\n            this.removeOverlay();\n        }\n",
+        "replace": "        _generateElementOnClick(type) {\n            const { startPosition, endPosition } = getPosition(type);\n            this.dispatchEvent(new CustomEvent('brainz-quick-create', {bubbles:true,composed:true,detail:{source:this.current,bound:this._computeNextBound(type),startPosition,endPosition}}));\n            this.removeOverlay();\n        }\n"
+      },
+      {
+        "find": "            const arrowDirections = isShape\n                ? [Direction.Right, Direction.Bottom, Direction.Left, Direction.Top]\n                : [Direction.Right, Direction.Left];",
+        "replace": "            const arrowDirections = [Direction.Right, Direction.Bottom, Direction.Left, Direction.Top];"
+      },
+      {
+        "find": "const arrowMargin = isShape ? height / 2 : height * (2 / 3);",
+        "replace": "const arrowMargin = 18;"
+      },
+      {
+        "find": "hidden: !isShape && type === Direction.Left && zoom >= 1.5,",
+        "replace": "hidden: false,"
+      },
+      {
+        "find": "if (this._isMoving || (this._isHover && !isShape)) {",
+        "replace": "if (this._isMoving) {"
+      },
+      {
+        "find": "}, 300);",
+        "replace": "}, 0);"
+      },
+      {
+        "find": "                        if (this.current instanceof ShapeElementModel) {\n                            const bound = this._computeNextBound(type);\n                            const path = this._computeLine(type, this.current, bound);\n                            this._showNextShape(this.current, bound, path, this.current.shapeType);\n                        }",
+        "replace": "                        const bound = this._computeNextBound(type);\n                        if (this.current instanceof ShapeElementModel) {\n                            const path = this._computeLine(type, this.current, bound);\n                            this._showNextShape(this.current, bound, path, this.current.shapeType);\n                        } else {\n                            const {startPosition,endPosition}=getPosition(type);\n                            const current=this.current.elementBound;\n                            this._autoCompleteOverlay.stroke='#e2c76b';\n                            this._autoCompleteOverlay.linePoints=[[current.x+current.w*startPosition[0],current.y+current.h*startPosition[1]],[bound.x+bound.w*endPosition[0],bound.y+bound.h*endPosition[1]]];\n                            this._autoCompleteOverlay.renderShape=ctx=>ctx.roundRect(bound.x,bound.y,bound.w,bound.h,12);\n                            this.edgeless.surface.renderer.addOverlay(this._autoCompleteOverlay);\n                            this.edgeless.surface.refresh();\n                        }"
+      },
+      {
+        "find": "          class=\"edgeless-auto-complete-arrow\"\n          @mouseenter",
+        "replace": "          class=\"edgeless-auto-complete-arrow\"\n          role=\"button\" tabindex=\"0\" aria-label=${`Add connected object ${['right','below','left','above'][type]}`}\n          @keydown=${e=>{if(e.key==='Enter' || e.key===' '){e.preventDefault();e.stopPropagation();this._generateElementOnClick(type);}}}\n          @mouseenter"
+      },
+      {
+        "find": "    .edgeless-auto-complete-arrow svg {\n      fill: #77757d;\n      color: #77757d;\n    }",
+        "replace": "    .edgeless-auto-complete-arrow { border:2px solid #e2c76b; background:#24241f; width:12px; height:12px; box-sizing:border-box; transition:background 120ms; }\n    .edgeless-auto-complete-arrow-wrapper:not(.mindmap) .edgeless-auto-complete-arrow svg { display:none; }\n    .edgeless-auto-complete-arrow-wrapper.mindmap .edgeless-auto-complete-arrow { width:24px; height:24px; }\n    .edgeless-auto-complete-arrow svg { fill:#e2c76b; color:#e2c76b; }\n    @media(prefers-reduced-motion:reduce) { * {transition:none!important;} }"
+      },
+      {
+        "find": "import { DEFAULT_NOTE_HEIGHT,",
+        "replace": "import { ConnectorMode, DEFAULT_NOTE_HEIGHT,"
+      },
+      {
+        "find": "            const id = edgeless.service.addElement(CanvasElementType.CONNECTOR, {\n                source,\n                target,\n            });",
+        "replace": "            const id = edgeless.service.addElement(CanvasElementType.CONNECTOR, {\n                source, target, mode:ConnectorMode.Orthogonal,\n            });"
+      }
+    ]
+  },
+  {
+    "file": "dist/root-block/edgeless/components/auto-complete/auto-complete-panel.js",
+    "originalHash": "0235f06edb97d1f2833aa9479e3d42c0439648e1a42a8b87750ce1b8cb63e7a2",
+    "replacements": [
+      {
+        "find": "        _autoComplete(targetType) {\n            this._removeOverlay();\n            if (!this._connectorExist())\n                return;\n            switch (targetType) {\n                case 'text':\n                    this._addText();\n                    break;\n                case 'note':\n                    this._addNote();\n                    break;\n                case 'frame':\n                    this._addFrame();\n                    break;\n                default:\n                    this._addShape(targetType);\n            }\n            this.remove();\n        }\n",
+        "replace": "        _autoComplete(targetType) {\n            this._removeOverlay();\n            if (!this._connectorExist()) return;\n            const source=this.currentSource;\n            const current=source.elementBound;\n            const width=targetType==='note'?(source instanceof NoteBlockModel?current.w:280):targetType==='text'?180:targetType==='frame'?320:current.w;\n            const height=targetType==='note'?(source instanceof NoteBlockModel?current.h:200):targetType==='text'?48:targetType==='frame'?240:current.h;\n            const target=this._getTargetXYWH(width,height);\n            if(!target)return;\n            this.dispatchEvent(new CustomEvent('brainz-quick-create',{bubbles:true,composed:true,detail:{source,bound:Bound.fromXYWH(target.xywh),targetType,connector:this.connector,endPosition:target.position}}));\n            this.remove();\n        }\n"
+      },
+      {
+        "find": "        connectedCallback() {\n            super.connectedCallback();",
+        "replace": "        connectedCallback() {\n            super.connectedCallback();\n            this.disposables.addFromEvent(window,'keydown',event=>{\n                if(event.metaKey || event.ctrlKey || event.altKey || event.isComposing)return;\n                if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();this.remove();return;}\n                const choices=[this._getCurrentSourceInfo().type,'note','text','roundedRect','ellipse','diamond','frame'];\n                const type=event.key==='Enter'?choices[0]:choices[Number(event.key)-1];\n                if(type){event.preventDefault();event.stopImmediatePropagation();this._autoComplete(type);}\n            },true);"
+      },
+      {
+        "find": "border-radius: 8px;\n      background: var(--affine-background-overlay-panel-color);",
+        "replace": "border-radius: 12px;\n      border:1px solid #4a483a;\n      color:#e5e3da;\n      background: var(--affine-background-overlay-panel-color);"
+      },
+      {
+        "find": "            const shapeButtons = repeat(ShapeComponentConfig, ({ name, generalIcon, scribbledIcon, tooltip }) => html `\n        <edgeless-tool-icon-button\n          .tooltip=${tooltip}\n          @pointerenter=${() => this._showOverlay(name)}\n          @pointerleave=${() => this._removeOverlay()}\n          @click=${() => this._autoComplete(name)}\n        >\n          ${currentSourceStyle === 'General' ? generalIcon : scribbledIcon}\n        </edgeless-tool-icon-button>\n      `);\n            return html `<div class=\"auto-complete-panel-container\" style=${style}>\n      ${shapeButtons}\n\n      <edgeless-tool-icon-button\n        .tooltip=${'Text'}\n        @pointerenter=${() => this._showOverlay('text')}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete('text')}\n      >\n        ${FontFamilyIcon}\n      </edgeless-tool-icon-button>\n      <edgeless-tool-icon-button\n        .tooltip=${'Note'}\n        @pointerenter=${() => this._showOverlay('note')}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete('note')}\n      >\n        ${SmallNoteIcon}\n      </edgeless-tool-icon-button>\n      <edgeless-tool-icon-button\n        .tooltip=${'Frame'}\n        @pointerenter=${() => this._showOverlay('frame')}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete('frame')}\n      >\n        ${FrameIcon}\n      </edgeless-tool-icon-button>\n\n      <edgeless-tool-icon-button\n        .iconContainerPadding=${0}\n        .tooltip=${capitalizeFirstLetter(currentSourceType)}\n        @pointerenter=${() => this._showOverlay(currentSourceType)}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete(currentSourceType)}\n      >\n        <div class=\"row-button\">Add a same object</div>\n      </edgeless-tool-icon-button>\n    </div>`;",
+        "replace": "            const choices=[[currentSourceType,'Same object','\u21b5'],['note','Sticky','2'],['text','Text','3'],['roundedRect','Box','4'],['ellipse','Ellipse','5'],['diamond','Diamond','6'],['frame','Frame','7']];\n            const icon=type=>type==='note'?SmallNoteIcon:type==='text'?FontFamilyIcon:type==='frame'?FrameIcon:ShapeComponentConfig.find(shape=>shape.name===type)?.generalIcon;\n            return html`<div class=\"auto-complete-panel-container\" style=${style} role=\"menu\" aria-label=\"Add connected object\">\n              ${choices.map(([type,label,key])=>html`<button class=\"brainz-option\" role=\"menuitem\" @pointerenter=${()=>this._showOverlay(type)} @pointerleave=${()=>this._removeOverlay()} @click=${()=>this._autoComplete(type)}>${icon(type)}<span>${label}</span><kbd>${key}</kbd></button>`)}\n            </div>`;"
+      },
+      {
+        "find": "width: 136px;",
+        "replace": "width: 208px;\n      max-height:calc(100vh - 96px);overflow:auto;"
+      },
+      {
+        "find": "    .row-button {",
+        "replace": "    .brainz-option { display:grid;grid-template-columns:20px 1fr 20px;align-items:center;gap:10px;width:100%;height:30px;padding:0 12px;border:0;background:transparent;color:#e5e3da;border-radius:6px;cursor:pointer;text-align:left;font:12px 'Brainz Canvas',Gellix,sans-serif; }\n    .brainz-option:hover,.brainz-option:focus-visible { background:#494332;color:#f1dea0;outline:none; }\n    .brainz-option svg {width:18px;height:18px;}\n    .brainz-option kbd {font:10px 'Brainz Canvas',sans-serif;color:#b5b4a9;text-align:right;}\n    .row-button {"
+      },
+      {
+        "find": "padding: 8px 0;\n      gap: 8px;",
+        "replace": "padding: 6px;\n      gap: 2px;"
+      }
+    ]
+  },
+  {
+    "file": "dist/root-block/edgeless/utils/snap-manager.js",
+    "originalHash": "f05a827ebafa47974ffb653b3de3cccceda612a47aba291de826b3b93a77102b",
+    "replacements": [
+      {
+        "find": "ctx.strokeStyle = '#1672F3';",
+        "replace": "ctx.strokeStyle = '#e2c76b';\n        ctx.setLineDash([4/viewport.zoom,4/viewport.zoom]);"
+      },
+      {
+        "find": "        this._intraGraphicAlignLines = [];\n        this._distributedAlignLines = [];\n        for (const other",
+        "replace": "        this._intraGraphicAlignLines = [];\n        this._distributedAlignLines = [];\n        if(globalThis.__brainzSuppressSnap){this._draw();return rst;}\n        for (const other"
+      }
+    ]
+  },
+  {
+    "file": "dist/root-block/edgeless/components/auto-complete/utils.js",
+    "originalHash": "1d6ca8de4ac0ff6a8756863ad36822df4cca20358e6d3c6fe7cfaf70a08c4291",
+    "replacements": [
+      {
+        "find": "export const PANEL_WIDTH = 136;",
+        "replace": "export const PANEL_WIDTH = 208;"
+      },
+      {
+        "find": "export const PANEL_HEIGHT = 108;",
+        "replace": "export const PANEL_HEIGHT = 240;"
+      }
+    ]
+  },
+  {
+    "file": "../affine-block-surface/dist/renderer/elements/connector/index.js",
+    "originalHash": "1029c8c45238df926a680cdfcb437678a77fc848ec67eaa757e23705193b8f2f",
+    "replacements": [
+      {
+        "find": "                else {\n                    ctx.lineTo(point[0], point[1]);\n                }",
+        "replace": "                else if(model.mode===ConnectorMode.Orthogonal && index<points.length-1) {\n                    const previous=points[index-1],next=points[index+1];\n                    const radius=Math.min(10,Math.hypot(point[0]-previous[0],point[1]-previous[1])/2,Math.hypot(next[0]-point[0],next[1]-point[1])/2);\n                    ctx.arcTo(point[0],point[1],next[0],next[1],radius);\n                } else {\n                    ctx.lineTo(point[0], point[1]);\n                }"
+      }
+    ]
+  }
+]

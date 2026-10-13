@@ -42,9 +42,14 @@ export class CanvasTools {
       {id:'reset-zoom',label:'Zoom to 100%',group:'View',run:()=>service.viewport.setZoom(1)},
       {id:'undo',label:'Undo',group:'Arrange',keys:'⌘Z',run:()=>editor.doc.undo()},
       {id:'redo',label:'Redo',group:'Arrange',keys:'⇧⌘Z',run:()=>editor.doc.redo()},
+      {id:'shortcuts',label:'Keyboard shortcuts',group:'View',keys:'?',run:()=>this.commands.show('shortcuts')},
       ...extra(),
     ]);
     document.getElementById('commands')!.onclick=()=>this.commands.show();
+    editor.addEventListener('contextmenu',event=>{
+      if(isTextInput(event) || service.selection.editing)return;
+      event.preventDefault();event.stopImmediatePropagation();this.commands.show('context',{x:event.clientX,y:event.clientY});
+    },true);
     this.installLaser(); this.installShapeMenu();
     this.controller.currentToolName$.subscribe(name=>{
       if(this.selecting)return;
@@ -102,7 +107,7 @@ export class CanvasTools {
   private keydown(event:KeyboardEvent) {
     const key=event.key.toLowerCase(), modified=event.metaKey || event.ctrlKey;
     if(modified && (key==='k' || key==='/')) {event.preventDefault();event.stopImmediatePropagation();this.commands.open?this.commands.close():this.commands.show();return;}
-    if(this.commands.open || document.querySelector('dialog[open]'))return;
+    if(this.commands.open || document.querySelector('dialog[open]') || this.editor.querySelector('edgeless-auto-complete-panel'))return;
     if(modified && key==='s') {event.preventDefault();event.stopImmediatePropagation();this.save();return;}
     const selected=this.service.selection.selectedElements;
     const mindmapNode=selected.length===1 && selected[0] instanceof ShapeElementModel && selected[0].group instanceof MindmapElementModel?selected[0]:undefined;
@@ -125,6 +130,7 @@ export class CanvasTools {
     const note=selected.length===1 && selected[0] instanceof NoteBlockModel?selected[0]:undefined;
     if(note && this.service.selection.editing && (event.key==='Tab' || (modified && event.key==='Enter'))) {
       event.preventDefault();event.stopImmediatePropagation();
+      this.editor.std.selection.setGroup('note',[]);
       this.service.selection.set({elements:[note.id],editing:false});window.getSelection()?.removeAllRanges();
       if(document.activeElement instanceof HTMLElement)document.activeElement.blur();
       if(event.key==='Tab') {
@@ -136,6 +142,7 @@ export class CanvasTools {
       return;
     }
     if(isTextInput(event) || this.service.selection.editing)return;
+    if(event.key==='?') {event.preventDefault();event.stopImmediatePropagation();this.commands.show('shortcuts');return;}
     if(event.key==='Escape') {this.select('pointer');return;}
     if(event.key==='Enter' && selected.length===1 && !modified) {
       if(note) {event.preventDefault();event.stopImmediatePropagation();editNote(this.editor.std,note);return;}
@@ -158,7 +165,7 @@ export class CanvasTools {
     document.getElementById('lock-tool')!.setAttribute('aria-pressed',String(this.locked));
     const selected=this.service.selection.selectedElements;
     const hint=document.querySelector('.hint')!;
-    hint.textContent=selected.length===1 && selected[0].group instanceof MindmapElementModel?'Tab adds a child · Enter adds a sibling':this.active==='note'?'Click to place · Tab for the next sticky':this.active==='laser'?'Point to highlight · Escape to finish':this.active==='eraser'?'Drag across objects to erase · ⌘Z to undo':selected.length>1?'F to frame · ⌘G to group · ⌘K for commands':selected.length===1?'Enter to edit · Drag to move · ⌘K for commands':'Space + drag to pan · Pinch to zoom';
+    hint.textContent=selected.length===1 && selected[0].group instanceof MindmapElementModel?'Tab adds a child · Enter adds a sibling':selected.length===1 && selected[0] instanceof NoteBlockModel && this.service.selection.editing?'Tab: next sticky · ⇧Tab: below · ⌘Enter: finish':this.active==='note'?'Click to place · Tab for the next sticky':this.active==='laser'?'Point to highlight · Escape to finish':this.active==='eraser'?'Drag across objects to erase · ⌘Z to undo':selected.length>1?'F to frame · ⌘G to group · ⌘K for commands':selected.length===1?'Enter to edit · Drag to move · ⌘K for commands':'Space + drag to pan · Pinch to zoom · ? for shortcuts';
   }
 
   private installShapeMenu() {

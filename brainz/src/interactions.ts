@@ -54,12 +54,16 @@ export function createNote(std: BlockStdScope, point: Point, width = 280, height
 export function editShape(editor: EdgelessEditor, shape: ShapeElementModel, initial?: string) {
   const root = editor.querySelector('affine-edgeless-root');
   if (!root?.mountElm || shape.isLocked()) return false;
+  editor.std.selection.setGroup('note',[]);
   if (!shape.text) root.service.updateElement(shape.id,{text:new Y.Text()});
   if (initial) editor.doc.spaceDoc.transact(()=>shape.text!.insert(shape.text!.length,initial));
   const input = document.createElement('edgeless-shape-text-editor') as HTMLElement & {
     element: ShapeElementModel; edgeless: typeof root; mountEditor: (next: ShapeElementModel) => void;
     updateComplete:Promise<boolean>; richText?:{updateComplete:Promise<unknown>;inlineEditor?:{focusEnd:()=>void}};
   };
+  // A previous sticky can leave the page as an editable ancestor. Isolate the
+  // floating editor so beforeinput reaches its own rich-text model.
+  input.contentEditable='false';
   input.element=shape; input.edgeless=root; input.mountEditor=(next)=>{editShape(editor,next);};
   root.mountElm.append(input); root.gfx.tool.setTool('default'); root.gfx.selection.set({elements:[shape.id],editing:true});
   const pending={typed:false,insert:(character:string)=>editor.doc.spaceDoc.transact(()=>{

@@ -46,7 +46,6 @@ h1 { font-weight:500; letter-spacing:-.7px; font-size:27px; margin:0 0 12px; } .
 .history button,.zoom-controls button { display:flex; align-items:center; justify-content:center; height:32px; min-width:32px; padding:0 8px; border-radius:7px; color:#bbb9ac; }.history button:hover,.zoom-controls button:hover { background:#37372f; color:#e5e3da; }.history svg { width:16px; height:16px; }
 .hint { font-size:10px; color:#74746a; user-select:none; transition:opacity .12s; }.hint span { margin:0 9px; }
 .zoom-controls { position:absolute; z-index:8; bottom:18px; right:18px; gap:2px; }.zoom-controls>span { width:1px; height:18px; background:#3d3c33; margin:0 4px; }#zoom-reset { min-width:48px; font-size:11px; font-variant-numeric:tabular-nums; }.zoom-controls svg { width:16px; height:16px; }
-.selection-bar { position:absolute; z-index:9; top:70px; left:50%; transform:translateX(-50%); display:flex; gap:9px; align-items:center; background:#25251f; border:1px solid #464536; border-radius:11px; padding:5px 6px 5px 12px; box-shadow:0 5px 20px #0004; }#selection-title { color:#a9a799; font-size:11px; max-width:210px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.selection-bar .text-button { font-size:11px; }
 #toast { z-index:10000; position:fixed; bottom:74px; left:50%; transform:translateX(-50%); padding:11px 16px; border-radius:10px; border:1px solid #4a483a; background:#303027; color:#e9e4d1; font-size:12px; box-shadow:0 5px 22px #0005; max-width:80%; }
 dialog { color:#e5e3da; background:#24241f; border:1px solid #454438; border-radius:17px; padding:24px; width:400px; max-width:90vw; box-shadow:0 20px 100px #0009; }dialog::backdrop { background:#090a0866; backdrop-filter:blur(4px); }.dialog-title { display:flex; align-items:center; justify-content:space-between; }.dialog-title h2 { font-size:19px; letter-spacing:-.3px; font-weight:550; margin:0; }.dialog-title button { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; }.dialog-title button:hover { background:#3a392f; }dialog p { color:#a19f92; font-size:12px; line-height:1.6; margin:10px 0 22px; }dialog label { display:flex; flex-direction:column; gap:8px; font-size:12px; color:#b6b2a4; margin:16px 0; }dialog input { width:100%; border-radius:9px; border:1px solid #454438; background:#1a1a17; color:#e6e1d2; padding:11px 12px; font-size:13px; }dialog input::placeholder { color:#716e61; }dialog .primary { width:100%; margin-top:12px; }#link-error { color:#eda58d; font-size:12px; }
 @keyframes breathe { 50% { opacity:.3; } }
@@ -74,7 +73,7 @@ dialog { color:#e5e3da; background:#24241f; border:1px solid #454438; border-rad
 .capture-region { position:absolute; border:1.5px solid #e2c76b; background:#e2c76b0c; box-shadow:0 0 0 10000px #0004; pointer-events:none; }
 .capture-region span { position:absolute; bottom:8px; right:8px; padding:5px 8px; border-radius:6px; background:#28271e; color:#ead894; font-size:11px; white-space:nowrap; }
 .capture-hint { position:absolute; top:16px; left:50%; transform:translateX(-50%); padding:10px 15px; border:1px solid #56503a; border-radius:10px; background:#29271f; font-size:12px; color:#dacfaa; pointer-events:none; white-space:nowrap; }
-body.capturing .tools,body.capturing .selection-bar,body.capturing .bottom-left,body.capturing .zoom-controls { pointer-events:none; opacity:.35; }
+body.capturing .tools,body.capturing .bottom-left,body.capturing .zoom-controls { pointer-events:none; opacity:.35; }
 affine-edgeless-note { --affine-text-primary-color:#302a1b; --affine-text-secondary-color:#685c3c; --affine-placeholder-color:#81734c; color:#302a1b; }
 /* Proposals never take pointer or keyboard focus away from the board. */
 .agent-preview{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4;overflow:hidden}
@@ -88,3 +87,10 @@ affine-edgeless-note { --affine-text-primary-color:#302a1b; --affine-text-second
 .agent-review button{flex-shrink:0}
 .canvas-agent-permission{display:flex;align-items:center;gap:8px;padding:12px;font-size:12px;white-space:nowrap}
 .canvas-agent-permission input{accent-color:#e2c76b}
+
+#link-dialog { position:absolute; inset:78px auto auto 120px; margin:0; width:min(355px,calc(100vw - 140px)); z-index:40; padding:20px; box-shadow:0 12px 40px #0007; }
+affine-edgeless-note[data-brainz-sized] { --affine-font-base:var(--brainz-sticky-font-size); --affine-font-sm:var(--brainz-sticky-font-size); --affine-line-height:1.35; }
+affine-edgeless-note[data-brainz-sized] .affine-paragraph-block-container { font-size:var(--brainz-sticky-font-size)!important; line-height:1.35!important; }
+affine-edgeless-note[data-brainz-sized] .edgeless-note-page-content { overflow:clip!important; }
+.canvas-command-panel[data-mode=context] { width:min(340px,calc(100vw - 16px)); }
+.canvas-command-panel[data-mode=context] #canvas-command-results { max-height:min(280px,calc(100vh - 195px)); }

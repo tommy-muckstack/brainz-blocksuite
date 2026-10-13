@@ -364,15 +364,18 @@ test('draw, attach connectors, move boxes, edit notes and reopen the saved board
 test('file cards open originals and stable object links refocus after reopening',async({page})=>{
   await openBoard(page);
   await page.evaluate(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'files',files:[{title:'Plan.md',url:'file:///tmp/Plan.md'}],position:[400,280]}})));
-  await page.getByRole('button',{name:'Open',exact:true}).click();
+  await page.locator('edgeless-element-toolbar-widget').getByLabel('More',{exact:true}).click();
+  await page.getByText('Open linked file',{exact:true}).click();
   expect(await page.evaluate(()=>window.__messages.find(m=>m.type==='open').url)).toBe('file:///tmp/Plan.md');
-  await page.getByRole('button',{name:'Copy object link',exact:true}).click();
+  await page.locator('edgeless-element-toolbar-widget').getByLabel('More',{exact:true}).click();
+  await page.getByText('Copy object link',{exact:true}).click();
   const link=await page.evaluate(()=>window.__messages.find(m=>m.type==='copy').text);
   const url=new URL(link);expect(url.protocol).toBe('brainz:');expect(url.searchParams.get('path')).toBe('/tmp/Brainz test.board.brainzboard');
   const id=url.searchParams.get('object');expect(id).toBeTruthy();
   await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
   await page.evaluate(object=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'focus',target:{path:'/tmp/Brainz test.board.brainzboard',object}}})),id);
-  await expect(page.getByRole('button',{name:'Open',exact:true})).toBeVisible();
+  await page.locator('edgeless-element-toolbar-widget').getByLabel('More',{exact:true}).click();
+  await expect(page.getByText('Open linked file',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window.__brainzBoard as any).service.selection.selectedIds)).toEqual([id]);
 });
 

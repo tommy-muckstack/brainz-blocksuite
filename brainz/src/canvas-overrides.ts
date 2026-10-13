@@ -1,6 +1,7 @@
 import { ConnectionOverlay } from '@blocksuite/affine-block-surface';
 import { EditPropsStore } from '@blocksuite/affine-shared/services';
 import { StdIdentifier } from '@blocksuite/block-std';
+import { GfxBlockElementModel, GfxPrimitiveElementModel } from '@blocksuite/block-std/gfx';
 import { createIdentifierFromConstructor, type Container } from '@blocksuite/global/di';
 import { Bound, getPointFromBoundsWithRotation, type IVec } from '@blocksuite/global/utils';
 
@@ -24,9 +25,36 @@ export class CanvasEditPropsStore extends EditPropsStore {
 }
 
 export class CanvasConnectionOverlay extends ConnectionOverlay {
+  private bindingPreview: [IVec,IVec] | undefined;
+
+  override clear() {this.bindingPreview=undefined;super.clear();}
+
+  override renderConnector(point:IVec, excludedIds:string[]=[]) {
+    const result=super.renderConnector(point,excludedIds);
+    this.bindingPreview=undefined;
+    const element=result.id?this.gfx.getElementById(result.id):undefined;
+    if((element instanceof GfxBlockElementModel || element instanceof GfxPrimitiveElementModel) && element.includesPoint(point[0],point[1],{ignoreTransparent:false},this.gfx.std.host)) {
+      const nearest=element.getNearestPoint(point);
+      if(nearest && Math.hypot(nearest[0]-point[0],nearest[1]-point[1])*this.gfx.viewport.zoom>8) {
+        const center=element.elementBound.center as IVec;
+        this.bindingPreview=[point,center];this.highlightPoint=center;
+        return {id:element.id};
+      }
+    }
+    return result;
+  }
+
+  private renderBinding(context:CanvasRenderingContext2D) {
+    if(!this.bindingPreview)return;
+    const [point,center]=this.bindingPreview,zoom=this.gfx.viewport.zoom;
+    context.save();context.strokeStyle='#e2c76b';context.lineWidth=1/zoom;context.setLineDash([4/zoom,4/zoom]);
+    context.beginPath();context.moveTo(...point);context.lineTo(...center);context.stroke();context.restore();
+  }
+
   override render(context: CanvasRenderingContext2D) {
     if (this.gfx.tool.currentToolName$.peek() !== 'connector') {
       super.render(context);
+      this.renderBinding(context);
       return;
     }
 
@@ -66,5 +94,6 @@ export class CanvasConnectionOverlay extends ConnectionOverlay {
       context.stroke();
     }
     context.restore();
+    this.renderBinding(context);
   }
 }
