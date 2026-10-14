@@ -100,7 +100,7 @@ test('Quick-create dots connect new shapes and stickies, focus text, and offer k
   await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.text?.toString())).toBe('Decision');
   expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.shapeType)).toBe('diamond');
   await page.keyboard.press('Escape');await page.screenshot({path:test.info().outputPath('quick-create.png')});
-  await page.locator('#save-state').click();await expect(page.locator('#save-state')).toContainText('Saved');await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await page.locator('#save-state').dispatchEvent('click');await expect(page.locator('#save-state')).toContainText('Saved');await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
   expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.text?.toString())).toBe('Decision');
 });
 
@@ -111,7 +111,7 @@ test('Sticky Auto sizing keeps its bounds, persists explicit sizing, and restore
   expect(await note.evaluate((element:any)=>JSON.parse(element.model.xywh).slice(2))).toEqual([280,200]);
   await page.getByRole('combobox',{name:'Sticky text size'}).selectOption('14');
   await expect.poll(()=>note.evaluate(element=>getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size'))).toBe('14px');
-  await page.locator('#save-state').click();await expect(page.locator('#save-state')).toContainText('Saved');await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await page.locator('#save-state').dispatchEvent('click');await expect(page.locator('#save-state')).toContainText('Saved');await page.reload();await page.waitForFunction(()=>Boolean(window.__brainzBoard));
   await expect.poll(()=>note.evaluate(element=>getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size'))).toBe('14px');
 });
 

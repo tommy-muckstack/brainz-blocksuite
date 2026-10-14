@@ -21,9 +21,11 @@ button svg { width:19px; height:19px; flex:none; }
 .canvas-menu [role=menu] { position:absolute; top:36px; left:0; min-width:185px; padding:5px; background:#282823; border:1px solid #454438; border-radius:10px; box-shadow:0 10px 32px #0006; }
 .canvas-menu button { display:block; width:100%; text-align:left; padding:10px 12px; border-radius:6px; font-size:12px; white-space:nowrap; }
 .canvas-menu button:hover { background:#3a392f; }
-#title { width:clamp(120px,22vw,245px); min-width:80px; border:1px solid transparent; background:transparent; color:#e5e3da; font-weight:550; font-size:14px; padding:7px 6px; border-radius:7px; text-overflow:ellipsis; }
+#title { width:auto; min-width:80px; max-width:min(42vw,420px); border:1px solid transparent; background:transparent; color:#e5e3da; font-weight:550; font-size:14px; padding:7px 6px; border-radius:7px; text-overflow:ellipsis; }
 #title:hover { background:#272722; } #title:focus { background:#272722; border-color:#4e4d3e; outline:none; }
-.save-state { display:flex; align-items:center; gap:6px; color:#93978a; font-size:11px; white-space:nowrap; cursor:pointer; }
+/* Only a failed save is worth a word in the header; the normal states stay in the DOM for assistive tech and tests but out of sight. */
+.save-state { display:none; align-items:center; gap:6px; color:#93978a; font-size:11px; white-space:nowrap; cursor:pointer; }
+.save-state.failed { display:flex; }
 .save-state i { width:5px; height:5px; border-radius:50%; background:#8fa57c; }
 .save-state.saving { color:#c4b781; }.save-state.saving i { background:#d9bf69; animation:breathe 1s ease-in-out infinite; }.save-state.failed { color:#efaa94; }
 .text-button { display:flex; align-items:center; justify-content:center; gap:7px; padding:8px 10px; border-radius:8px; font-size:12px; line-height:18px; white-space:nowrap; transition:background .13s,color .13s; }

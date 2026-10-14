@@ -41,6 +41,15 @@ const get = <T extends HTMLElement = HTMLElement>(id:string) => document.getElem
 const title = get<HTMLInputElement>('title');
 title.insertAdjacentHTML('afterend','<details id="canvas-menu" class="canvas-menu"><summary aria-label="Canvas options" title="Canvas options">⌄</summary><div role="menu"><button id="new-canvas" role="menuitem">New canvas…</button><button id="move-canvas" role="menuitem">Move to folder…</button></div></details>');
 const saveState = get('save-state');
+// The title input hugs its text so the canvas menu sits right after it.
+const titleRuler = window.document.createElement('canvas').getContext('2d')!;
+function fitTitle() {
+  const style = getComputedStyle(title);
+  titleRuler.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const text = title.value || title.placeholder || 'Untitled canvas';
+  const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2;
+  title.style.width = `${Math.ceil(titleRuler.measureText(text).width) + padding + 4}px`;
+}
 const dialog = get<HTMLDialogElement>('link-dialog');
 let editor: EdgelessEditor;
 let collection: DocCollection;
@@ -262,7 +271,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   defaults.recordLastProps('shape:roundedRect',{fillColor:{normal:'#292c28'},strokeColor:{normal:'#a6b995'},strokeWidth:2,color:{normal:'#e5e3da'},radius:.1,shapeStyle:ShapeStyle.General,fontSize:18,fontFamily:FontFamily.Inter});
   defaults.recordLastProps('affine:note',{background:{normal:'#e6ca78'},edgeless:{style:{borderRadius:12,borderSize:0,borderStyle:StrokeStyle.None,shadowType:NoteShadow.Box}}});
   defaults.recordLastProps('connector',{stroke:{normal:'#a8b59a'},strokeWidth:2});
-  title.value = document?.title || 'Untitled canvas';
+  title.value = document?.title || 'Untitled canvas'; fitTitle();
   links = doc.spaceDoc.getMap<LinkReference>('brainz:links');
   const migrations = doc.spaceDoc.getMap<number>('brainz:migrations');
   const migratedFont = migrations.get('canvas-font') !== 1;
@@ -463,7 +472,7 @@ get('link-form').onsubmit = event => {
   const label=get<HTMLInputElement>('link-title').value.trim() || decodeURIComponent(url.pathname.split('/').pop() || url.hostname || 'Linked item');
   addLink({title:label,url:url.toString()}); dialog.close(); get<HTMLFormElement>('link-form').reset(); get('link-error').textContent='';
 };
-title.oninput = () => { changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = flush; saveState.onclick = save;
+title.oninput = () => { fitTitle(); changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = flush; saveState.onclick = save;
 window.addEventListener('pointerup',() => { if(saveTimer) save(); });
 window.addEventListener('keyup',() => { if(saveTimer) save(); });
 window.addEventListener('pagehide',() => { flush(); if (!loading && savedRevision >= revision) storage.checkpoint(checkpoint); });
