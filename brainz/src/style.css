@@ -23,7 +23,7 @@ button svg { width:19px; height:19px; flex:none; }
 .canvas-menu button:hover { background:#3a392f; }
 #title { width:auto; min-width:80px; max-width:min(42vw,420px); border:1px solid transparent; background:transparent; color:#e5e3da; font-weight:550; font-size:14px; padding:7px 6px; border-radius:7px; text-overflow:ellipsis; }
 #title:hover { background:#272722; } #title:focus { background:#272722; border-color:#4e4d3e; outline:none; }
-/* Only a failed save is worth a word in the header; the normal states stay in the DOM for assistive tech and tests but out of sight. */
+/* Only a failed save is worth a word in the header; the other states are kept in the DOM (hidden) for the tests that read them. */
 .save-state { display:none; align-items:center; gap:6px; color:#93978a; font-size:11px; white-space:nowrap; cursor:pointer; }
 .save-state.failed { display:flex; }
 .save-state i { width:5px; height:5px; border-radius:50%; background:#8fa57c; }

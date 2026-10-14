@@ -272,6 +272,8 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   defaults.recordLastProps('affine:note',{background:{normal:'#e6ca78'},edgeless:{style:{borderRadius:12,borderSize:0,borderStyle:StrokeStyle.None,shadowType:NoteShadow.Box}}});
   defaults.recordLastProps('connector',{stroke:{normal:'#a8b59a'},strokeWidth:2});
   title.value = document?.title || 'Untitled canvas'; fitTitle();
+  // Measured again once the canvas font is in; the first pass may have used the fallback face.
+  void window.document.fonts.ready.then(fitTitle);
   links = doc.spaceDoc.getMap<LinkReference>('brainz:links');
   const migrations = doc.spaceDoc.getMap<number>('brainz:migrations');
   const migratedFont = migrations.get('canvas-font') !== 1;
