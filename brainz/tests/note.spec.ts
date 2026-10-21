@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { splitMarkdown } from '../src/note/split';
 
-const corpus = process.env.BRAINZ_EDITOR_CORPUS ?? join(__dirname, '../../../crates/brainz_editor/tests/corpus');
+const corpus = process.env.BRAINZ_EDITOR_CORPUS ?? join(dirname(fileURLToPath(import.meta.url)), '../../../crates/brainz_editor/tests/corpus');
 const files = (() => { try { return readdirSync(corpus).filter(name => name.endsWith('.md')).sort(); } catch { return []; } })();
 
 type NoteHarness = { load(markdown: string, readOnly?: boolean): Promise<void>; render(): Promise<string> };
