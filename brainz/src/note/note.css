@@ -1,0 +1,26 @@
+@font-face { font-family:'Brainz Canvas'; src:local('Gellix'),url('/fonts/Brainz-Regular.ttf') format('truetype'); font-weight:100 900; font-style:normal; font-display:swap; }
+@font-face { font-family:'Brainz Canvas'; src:local('Gellix Italic'),url('/fonts/Brainz-Italic.ttf') format('truetype'); font-weight:100 900; font-style:italic; font-display:swap; }
+:root { color-scheme:dark; font-family:'Brainz Canvas','Gellix',sans-serif; color:#e5e3da; background:#141413; font-synthesis:none; }
+* { box-sizing:border-box; }
+html,body { margin:0; height:100%; background:#141413; }
+body { overflow:hidden; }
+#note { position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; }
+/* Markdown has no separate page title, so the doc title stays out of sight. */
+doc-title,.doc-title-container { display:none!important; }
+page-editor,.affine-page-viewport { background:#141413!important; }
+.affine-page-root-block-container { max-width:760px!important; margin:0 auto!important; padding:56px 48px 40vh!important; }
+affine-paragraph,affine-list { line-height:1.7; }
+::selection { background:#e2c76b40; }
+.affine-paragraph-block-container [contenteditable], rich-text { caret-color:#e2c76b; }
+affine-link a, .affine-link { color:#e2c76b!important; text-decoration-color:#e2c76b66!important; }
+.source-toggle { position:fixed; z-index:20; top:12px; right:16px; display:flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid #3b3b34; border-radius:8px; background:#22221fcc; color:#99988e; font:500 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); }
+.source-toggle:hover { color:#e5e3da; border-color:#5a584c; }
+.source-toggle kbd { font:inherit; opacity:.6; }
+body.read-only .source-toggle::after { content:'Read only'; margin-left:6px; color:#e2c76b; }
+:root { --affine-font-base:16px; --affine-line-height:1.7; }
+/* BlockSuite hardcodes its blue into the checked box. */
+.affine-list-block__todo-prefix svg path[fill="#1E96EB"] { fill:#e2c76b; }
+.affine-list-block__todo-prefix { color:#99988e; }
+affine-code .affine-code-block-container { background:#1d1d1b!important; border:1px solid #2c2c27; border-radius:10px; }
+affine-paragraph[data-type="quote"] .quote,.affine-paragraph-block-container .quote::after { background:#e2c76b!important; }
+.affine-list-block__numbered { color:#e2c76b!important; }
