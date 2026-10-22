@@ -43,3 +43,10 @@ body.has-backlinks page-editor, body.has-backlinks .affine-page-viewport { min-h
 .backlink strong { font-weight:600; margin-right:8px; }
 .backlink span { color:#77766d; font-size:12px; }
 .backlink p { margin:4px 0 0; color:#99988e; font-size:13px; line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.claude-menu { position:fixed; z-index:25; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
+.claude-menu[hidden], .claude-actions[hidden] { display:none; }
+.claude-chip { padding:4px 10px; border:1px solid #e2c76b66; border-radius:8px; background:#22221fee; color:#e2c76b; font:600 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); }
+.claude-chip:hover { border-color:#e2c76b; }
+.claude-actions { display:flex; flex-direction:column; min-width:170px; padding:4px; border:1px solid #3b3b34; border-radius:10px; background:#22221ff2; box-shadow:0 8px 24px #0006; }
+.claude-actions button { padding:7px 10px; border:0; border-radius:6px; background:transparent; color:#e5e3da; text-align:left; font:500 13px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; }
+.claude-actions button:hover { background:#d8c87a26; }

@@ -86,7 +86,7 @@ for (const [key, value] of Object.entries(theme)) document.documentElement.style
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = '<main id="note" aria-label="Note"></main><div class="note-actions"><button class="history-button" type="button" title="See and restore earlier versions">History</button><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button></div><button class="copy-chip" type="button" hidden>Copy</button>';
+app.innerHTML = '<main id="note" aria-label="Note"></main><div class="note-actions"><button class="history-button" type="button" title="See and restore earlier versions">History</button><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button></div><button class="copy-chip" type="button" hidden>Copy</button><div class="claude-menu" hidden><button class="claude-chip" type="button">✦ Claude</button><div class="claude-actions" role="menu" hidden><button type="button" data-action="rewrite">Rewrite clearer</button><button type="button" data-action="summarize">Summarize below</button><button type="button" data-action="todos">Turn into to-dos</button><button type="button" data-action="ask">Ask Claude…</button></div></div>';
 const host = document.getElementById('note')!;
 
 let notes: NoteEntry[] = [];
@@ -486,6 +486,41 @@ function renderBacklinks(items: Backlink[]) {
   }
   if (!backlinks.isConnected) host.append(backlinks);
 }
+
+// Selected text gets a Claude menu. Brainz hands the passage and the chosen
+// action to Claude in the chat, which edits the note file itself.
+const claudeMenu = document.querySelector<HTMLDivElement>('.claude-menu')!;
+const claudeChip = claudeMenu.querySelector<HTMLButtonElement>('.claude-chip')!;
+const claudeActions = claudeMenu.querySelector<HTMLDivElement>('.claude-actions')!;
+let selectedText = '';
+function placeClaudeMenu() {
+  const selection = window.getSelection();
+  const text = selection && !selection.isCollapsed ? selection.toString().trim() : '';
+  const inNote = !!selection?.anchorNode && host.contains(selection.anchorNode);
+  if (!text || !inNote || document.body.classList.contains('read-only')) {
+    if (!claudeMenu.contains(document.activeElement)) { claudeMenu.hidden = true; claudeActions.hidden = true; }
+    return;
+  }
+  selectedText = text;
+  const box = selection!.getRangeAt(selection!.rangeCount - 1).getBoundingClientRect();
+  // BlockSuite's formatting toolbar sits above a selection, so this goes below
+  // it unless that would leave the window.
+  const below = box.bottom + 8;
+  claudeMenu.style.top = `${below + 150 < window.innerHeight ? below : Math.max(box.top - 190, 8)}px`;
+  claudeMenu.style.left = `${Math.min(box.left, window.innerWidth - 200)}px`;
+  claudeMenu.hidden = false;
+}
+document.addEventListener('selectionchange', () => requestAnimationFrame(placeClaudeMenu));
+host.addEventListener('scroll', () => { claudeMenu.hidden = true; claudeActions.hidden = true; });
+claudeMenu.addEventListener('mousedown', event => event.preventDefault());
+claudeChip.addEventListener('click', () => { claudeActions.hidden = !claudeActions.hidden; });
+claudeActions.addEventListener('click', event => {
+  const action = (event.target as HTMLElement).closest<HTMLButtonElement>('button')?.dataset.action;
+  if (!action || !selectedText) return;
+  void save().catch(reportError);
+  post({ type: 'claude', action, text: selectedText });
+  claudeMenu.hidden = true; claudeActions.hidden = true;
+});
 
 // Tables and images get a Copy button on hover. A table copies as tab-separated
 // text and an HTML table, which Sheets and Excel paste as rows and columns.

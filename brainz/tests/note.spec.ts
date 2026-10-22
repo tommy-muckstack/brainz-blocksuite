@@ -297,3 +297,29 @@ test('notes that link here are listed under the note', async ({ page }) => {
   await expect.poll(() => posted.find(message => message.type === 'open')?.href).toBe('../work/plan.md');
   expect(await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render())).toBe('# Sam Lee\n\nNotes.\n');
 });
+
+test('selected text offers Claude actions that go to Brainz', async ({ page }) => {
+  const posted: { type?: string; action?: string; text?: string }[] = [];
+  page.on('console', async message => {
+    for (const argument of message.args()) {
+      const value = await argument.jsonValue().catch(() => null) as { type?: string } | null;
+      if (value?.type) posted.push(value);
+    }
+  });
+  await open(page);
+  await roundTrip(page, '# Plan\n\nCall Sam about the budget on Friday.\n\nOther text.\n');
+  const paragraph = page.getByText('Call Sam about the budget on Friday.', { exact: true });
+  await paragraph.dblclick();
+  await page.keyboard.press('Shift+End');
+  await page.evaluate(() => {
+    const target = [...document.querySelectorAll('[contenteditable="true"] *')].find(node => node.textContent === 'Call Sam about the budget on Friday.')!;
+    const range = document.createRange(); range.selectNodeContents(target);
+    const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+  });
+  const chip = page.locator('.claude-chip');
+  await expect(chip).toBeVisible();
+  await chip.click();
+  await page.locator('.claude-actions [data-action="todos"]').click();
+  await expect.poll(() => posted.find(message => message.type === 'claude')).toEqual({ type: 'claude', action: 'todos', text: 'Call Sam about the budget on Friday.' });
+  await expect(page.locator('.claude-menu')).toBeHidden();
+});
