@@ -11,6 +11,10 @@ import { assemble, isContent, type Segment, type TopBlock } from './segments';
 import { splitMarkdown } from './split';
 import './note.css';
 
+// Notes are plain Markdown, where "$" is money, not math: "$5 and $6" must not
+// become a formula. Brainz's engine patch reads this switch; the canvas keeps math.
+(globalThis as { __brainzMarkdownMath?: boolean }).__brainzMarkdownMath = false;
+
 type Incoming =
   | { type: 'load'; path: string; readOnly: boolean; segments: Segment[] }
   | { type: 'focus' }

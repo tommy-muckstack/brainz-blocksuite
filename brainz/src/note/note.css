@@ -24,3 +24,6 @@ body.read-only .source-toggle::after { content:'Read only'; margin-left:6px; col
 affine-code .affine-code-block-container { background:#1d1d1b!important; border:1px solid #2c2c27; border-radius:10px; }
 affine-paragraph[data-type="quote"] .quote,.affine-paragraph-block-container .quote::after { background:#e2c76b!important; }
 .affine-list-block__numbered { color:#e2c76b!important; }
+
+/* A Markdown table has no title; the database block's "Untitled" would be noise. */
+affine-database-title { display:none!important; }

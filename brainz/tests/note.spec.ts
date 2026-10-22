@@ -66,6 +66,25 @@ test('navigation keys delivered as text never reach the note', async ({ page }) 
   expect(output).toBe(source.replace('Second paragraph.', 'Second paragraph. Still typing.'));
 });
 
+test('dollar amounts stay text, before and after an edit', async ({ page }) => {
+  await open(page);
+  const source = '# Plan\n\nPaid $1,524.68 today: $1,434.99 subtotal.\n\nSecond paragraph.\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await expect(page.getByText('Paid $1,524.68 today: $1,434.99 subtotal.', { exact: true })).toBeVisible();
+  await clickEnd(page, 'Paid $1,524.68 today: $1,434.99 subtotal.');
+  await page.keyboard.type(' Done.');
+  const output = await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render());
+  expect(output).toBe(source.replace('subtotal.', 'subtotal. Done.'));
+});
+
+test('tables show without a database title', async ({ page }) => {
+  await open(page);
+  const source = '| Name | Value |\n| ---- | ----- |\n| a    | 1     |\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await expect(page.locator('affine-database')).toBeVisible();
+  await expect(page.locator('affine-database-title')).toBeHidden();
+});
+
 test('checklists, headings and quotes render as blocks', async ({ page }) => {
   await open(page);
   await roundTrip(page, '# Heading\n\n- [ ] open task\n- [x] done task\n\n> quoted\n');
