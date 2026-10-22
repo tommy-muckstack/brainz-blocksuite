@@ -86,7 +86,7 @@ for (const [key, value] of Object.entries(theme)) document.documentElement.style
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = '<main id="note" aria-label="Note"></main><div class="note-actions"><button class="history-button" type="button" title="See and restore earlier versions">History</button><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button></div><button class="copy-chip" type="button" hidden>Copy</button><div class="claude-menu" hidden><button class="claude-chip" type="button">✦ Claude</button><div class="claude-actions" role="menu" hidden><button type="button" data-action="rewrite">Rewrite clearer</button><button type="button" data-action="summarize">Summarize below</button><button type="button" data-action="todos">Turn into to-dos</button><button type="button" data-action="ask">Ask Claude…</button></div></div>';
+app.innerHTML = '<main id="note" aria-label="Note"></main><div class="note-actions"><button class="rename-button" type="button" hidden></button><button class="history-button" type="button" title="See and restore earlier versions">History</button><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button></div><button class="copy-chip" type="button" hidden>Copy</button><div class="claude-menu" hidden><button class="claude-chip" type="button">✦ Claude</button><div class="claude-actions" role="menu" hidden><button type="button" data-action="rewrite">Rewrite clearer</button><button type="button" data-action="summarize">Summarize below</button><button type="button" data-action="todos">Turn into to-dos</button><button type="button" data-action="ask">Ask Claude…</button></div></div>';
 const host = document.getElementById('note')!;
 
 let notes: NoteEntry[] = [];
@@ -338,7 +338,36 @@ async function save() {
   post({ type: 'save', revision: ++revision, markdown });
 }
 
+// A new note named "untitled" offers to take its first heading as its file
+// name; Brainz also updates links to it in other notes.
+const renameButton = document.querySelector<HTMLButtonElement>('.rename-button')!;
+export function fileNameForHeading(heading: string): string | undefined {
+  const cleaned = heading.replace(/[\/\\:*?"<>|]/g, '-').replace(/[\u0000-\u001f]/g, ' ').split(/\s+/).filter(Boolean).join(' ').replace(/^[. ]+|[. ]+$/g, '').slice(0, 100).trimEnd();
+  return cleaned ? `${cleaned}.md` : undefined;
+}
+function firstHeading(): string {
+  const note = current?.doc.getBlock(current.noteId)?.model;
+  const block = note?.children.find(child => child.flavour === 'affine:paragraph' && (child as BlockModel & { type?: string }).type === 'h1') as (BlockModel & { text?: Text }) | undefined;
+  return block?.text?.toString().trim() ?? '';
+}
+function updateRenameButton() {
+  const heading = firstHeading();
+  const name = fileNameForHeading(heading);
+  // Only notes still carrying the placeholder name Create gives them;
+  // deliberate file names stay as they are.
+  const placeholder = /^untitled(?:[ -]\d+)?\.md$/i.test(document.title);
+  const show = placeholder && !!name && !!current && !current.doc.readonly && name !== document.title;
+  renameButton.hidden = !show;
+  if (show) { renameButton.textContent = `Rename file to “${name}”`; renameButton.dataset.heading = heading; }
+}
+renameButton.addEventListener('click', () => {
+  void save().catch(reportError);
+  post({ type: 'rename', heading: renameButton.dataset.heading ?? '' });
+  renameButton.hidden = true;
+});
+
 function scheduleSave() {
+  setTimeout(updateRenameButton, 0);
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { void save().catch(reportError); }, SAVE_DELAY);
 }
@@ -409,6 +438,7 @@ async function load(path: string, readOnly: boolean, segments: Segment[]) {
   });
   if (previous) collection.removeDoc(previous.doc.id);
   if (hadFocus) focusEditor();
+  updateRenameButton();
 }
 
 function focusEditor() {
@@ -421,7 +451,7 @@ window.brainzNote = {
     if (message.type === 'load') void load(message.path, message.readOnly, message.segments).catch(reportError);
     else if (message.type === 'focus') focusEditor();
     else if (message.type === 'saved') revision = Math.max(revision, message.revision);
-    else if (message.type === 'notes') { notes = message.notes; notePath = message.current; }
+    else if (message.type === 'notes') { notes = message.notes; notePath = message.current; document.title = notePath.split('/').pop() || document.title; updateRenameButton(); }
     else if (message.type === 'backlinks') renderBacklinks(message.items);
     else if (message.type === 'imageSaved') { pendingImages.get(message.request)?.resolve(message.src); pendingImages.delete(message.request); }
     else if (message.type === 'imageFailed') { pendingImages.get(message.request)?.reject(new Error(message.message)); pendingImages.delete(message.request); }

@@ -323,3 +323,30 @@ test('selected text offers Claude actions that go to Brainz', async ({ page }) =
   await expect.poll(() => posted.find(message => message.type === 'claude')).toEqual({ type: 'claude', action: 'todos', text: 'Call Sam about the budget on Friday.' });
   await expect(page.locator('.claude-menu')).toBeHidden();
 });
+
+test('an untitled note offers to take its heading as its file name', async ({ page }) => {
+  const posted: { type?: string; heading?: string }[] = [];
+  page.on('console', async message => {
+    for (const argument of message.args()) {
+      const value = await argument.jsonValue().catch(() => null) as { type?: string } | null;
+      if (value?.type) posted.push(value);
+    }
+  });
+  await open(page);
+  await roundTrip(page, '# Untitled\n\nText.\n');
+  await page.evaluate(() => (window as unknown as { __brainzNote: Receiver }).__brainzNote.receive({ type: 'notes', current: 'Untitled.md', notes: [] }));
+  const button = page.locator('.rename-button');
+  await expect(button).toBeHidden();
+  await clickEnd(page, 'Untitled');
+  await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
+  await page.keyboard.type('ed: Q4 plan');
+  await expect(button).toHaveText('Rename file to “Untitled- Q4 plan.md”');
+  await button.click();
+  await expect.poll(() => posted.find(message => message.type === 'rename')?.heading).toBe('Untitled: Q4 plan');
+  await page.evaluate(() => (window as unknown as { __brainzNote: Receiver }).__brainzNote.receive({ type: 'notes', current: 'Untitled- Q4 plan.md', notes: [] }));
+  await expect(button).toBeHidden();
+  // A note with a chosen file name never offers it.
+  await roundTrip(page, '# Tommy\'s phone\n\nText.\n');
+  await page.evaluate(() => (window as unknown as { __brainzNote: Receiver }).__brainzNote.receive({ type: 'notes', current: 'personal/phone.md', notes: [] }));
+  await expect(button).toBeHidden();
+});
