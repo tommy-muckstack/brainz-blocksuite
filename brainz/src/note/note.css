@@ -27,3 +27,6 @@ affine-paragraph[data-type="quote"] .quote,.affine-paragraph-block-container .qu
 
 /* A Markdown table has no title; the database block's "Untitled" would be noise. */
 affine-database-title { display:none!important; }
+.copy-chip { position:fixed; z-index:20; transform:translateX(-100%); padding:4px 9px; border:1px solid #3b3b34; border-radius:7px; background:#22221fe6; color:#e5e3da; font:500 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); }
+.copy-chip:hover { border-color:#e2c76b; }
+.copy-chip[hidden] { display:none; }

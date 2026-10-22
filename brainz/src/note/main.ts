@@ -18,7 +18,9 @@ import './note.css';
 type Incoming =
   | { type: 'load'; path: string; readOnly: boolean; segments: Segment[] }
   | { type: 'focus' }
-  | { type: 'saved'; revision: number };
+  | { type: 'saved'; revision: number }
+  | { type: 'imageSaved'; request: number; src: string }
+  | { type: 'imageFailed'; request: number; message: string };
 
 declare global {
   interface Window {
@@ -60,13 +62,14 @@ for (const [key, value] of Object.entries(theme)) document.documentElement.style
   type Item = (typeof AffineSlashMenuWidget.DEFAULT_CONFIG.items)[number];
   const dropGroups = new Set(['Page', 'Database', 'Document Group & Frame']);
   const dropNames = new Set(['Inline equation', 'Equation', 'Underline']);
+  const keptMedia = new Set(['Link', 'Image']);
   const kept: Item[] = [];
   let group = '';
   for (const item of AffineSlashMenuWidget.DEFAULT_CONFIG.items) {
     if (typeof item === 'function') continue;
     if ('groupName' in item) { group = item.groupName; kept.push(item); continue; }
     if (dropGroups.has(group) || dropNames.has(item.name)) continue;
-    if (group === 'Content & Media' && item.name !== 'Link') continue;
+    if (group === 'Content & Media' && !keptMedia.has(item.name)) continue;
     kept.push(item);
   }
   const items = kept.filter((item, index) => !('groupName' in item) || (index + 1 < kept.length && !('groupName' in kept[index + 1])));
@@ -74,7 +77,7 @@ for (const [key, value] of Object.entries(theme)) document.documentElement.style
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = '<main id="note" aria-label="Note"></main><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button>';
+app.innerHTML = '<main id="note" aria-label="Note"></main><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button><button class="copy-chip" type="button" hidden>Copy</button>';
 const host = document.getElementById('note')!;
 
 const collection = new DocCollection({ id: 'brainz-note', schema: new Schema().register(AffineSchemas) });
@@ -91,6 +94,8 @@ interface Loaded {
   /** Every block imported at load (any depth) → its segment. */
   segmentOf: Map<string, number>;
   raw: Set<string>;
+  /** Image block → the Markdown it was read from, so an untouched image keeps its path. */
+  images: Map<string, ImageRef & { sourceId: string }>;
   dirty: Set<number>;
   /** Set once the structure or any block changed, so an untouched note never writes. */
   touched: boolean;
@@ -108,9 +113,63 @@ function post(message: Record<string, unknown>) {
 
 function newJob() { return new Job({ collection, middlewares: [] }); }
 
-async function importSegment(doc: Doc, noteId: string, segment: Segment): Promise<{ ids: string[]; raw: boolean }> {
+/** `![alt](src)` alone on a line; `|300` after the alt is Obsidian's width. */
+export interface ImageRef { src: string; alt: string; width: number }
+const imageLine = /^!\[([^\]]*)\]\((?:<([^>]+)>|([^)\s]+))(?:\s+"[^"]*")?\)$/;
+
+export function parseImage(text: string): ImageRef | null {
+  const match = imageLine.exec(text.trim());
+  if (!match) return null;
+  const [alt, size] = match[1].split('|');
+  return { src: match[2] ?? match[3], alt: size !== undefined && /^\d+$/.test(size.trim()) ? alt : match[1], width: size !== undefined && /^\d+$/.test(size.trim()) ? Number(size) : 0 };
+}
+
+export function imageMarkdown(image: ImageRef): string {
+  const alt = image.alt.replace(/[\[\]\n]/g, ' ') + (image.width > 0 ? `|${Math.round(image.width)}` : '');
+  const src = /[\s()]/.test(image.src) ? `<${image.src}>` : image.src;
+  return `![${alt}](${src})`;
+}
+
+const isExternal = (src: string) => /^[a-z][a-z0-9+.-]*:/i.test(src);
+
+/** Files in the brain are read through Brainz, relative to the open note. */
+async function fetchBrainImage(src: string): Promise<Blob | null> {
+  const response = await fetch(`brain-file?path=${encodeURIComponent(src)}`).catch(() => null);
+  if (!response?.ok) return null;
+  const blob = await response.blob();
+  return blob.type.startsWith('image/') ? blob : null;
+}
+
+let imageRequests = 0;
+const pendingImages = new Map<number, { resolve(src: string): void; reject(error: Error): void }>();
+
+/** Writes a pasted or dropped image next to the note and returns its Markdown path. */
+async function persistImage(blob: Blob): Promise<string> {
+  const request = ++imageRequests;
+  if (!window.ipc) return `attachments/image-${request}.${blob.type.split('/')[1] || 'png'}`;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  const saved = new Promise<string>((resolve, reject) => pendingImages.set(request, { resolve, reject }));
+  post({ type: 'image', request, mime: blob.type || 'image/png', data: btoa(binary) });
+  return saved;
+}
+
+async function importSegment(state: Loaded, segment: Segment): Promise<{ ids: string[]; raw: boolean }> {
+  const { doc, noteId } = state;
   const rawBlock = () => [doc.addBlock('affine:code', { text: new Text(segment.text), language: 'markdown' }, noteId)];
-  // Images need their files loaded through Brainz; keep them as Markdown for now.
+  const image = segment.kind === 'paragraph' ? parseImage(segment.text) : null;
+  if (image && !isExternal(image.src)) {
+    const blob = await fetchBrainImage(image.src);
+    if (blob) {
+      const sourceId = `brain-image:${image.src}`;
+      await doc.blobSync.set(sourceId, blob);
+      const id = doc.addBlock('affine:image', { sourceId, caption: image.alt, width: image.width }, noteId);
+      state.images.set(id, { ...image, sourceId });
+      return { ids: [id], raw: false };
+    }
+  }
+  // Web images, missing files and images inside text stay as Markdown.
   if (RAW_KINDS.has(segment.kind) || segment.text.includes('![')) return { ids: rawBlock(), raw: true };
   try {
     const job = newJob();
@@ -171,6 +230,19 @@ async function serializeRun(state: Loaded, ids: string[]): Promise<string> {
   }
   const chunks: string[] = [];
   for (const group of groups) {
+    const block = state.doc.getBlock(group[0])?.model as (BlockModel & { sourceId?: string; caption?: string; width?: number }) | undefined;
+    if (block?.flavour === 'affine:image') {
+      const known = state.images.get(group[0]);
+      let src = known && known.sourceId === block.sourceId ? known.src : undefined;
+      if (src === undefined) {
+        const blob = block.sourceId ? await state.doc.blobSync.get(block.sourceId) : null;
+        if (!blob) continue;
+        src = await persistImage(blob);
+        state.images.set(group[0], { src, alt: block.caption ?? '', width: block.width ?? 0, sourceId: block.sourceId ?? '' });
+      }
+      chunks.push(imageMarkdown({ src, alt: block.caption ?? '', width: block.width ?? 0 }));
+      continue;
+    }
     if (state.raw.has(group[0])) {
       const model = state.doc.getBlock(group[0])?.model as (BlockModel & { text?: Text }) | undefined;
       chunks.push(model?.text?.toString() ?? '');
@@ -223,10 +295,10 @@ async function load(path: string, readOnly: boolean, segments: Segment[]) {
   const page = doc.addBlock('affine:page', { title: new Text('') });
   doc.addBlock('affine:surface', {}, page);
   const noteId = doc.addBlock('affine:note', {}, page);
-  const state: Loaded = { doc, noteId, segments, original: new Map(), segmentOf: new Map(), raw: new Set(), dirty: new Set(), touched: false };
+  const state: Loaded = { doc, noteId, segments, original: new Map(), segmentOf: new Map(), raw: new Set(), images: new Map(), dirty: new Set(), touched: false };
   for (const segment of segments) {
     if (!isContent(segment)) continue;
-    const { ids, raw } = await importSegment(doc, noteId, segment);
+    const { ids, raw } = await importSegment(state, segment);
     if (token !== generation) return;
     state.original.set(segment.id, ids);
     for (const id of ids) {
@@ -286,6 +358,8 @@ window.brainzNote = {
     if (message.type === 'load') void load(message.path, message.readOnly, message.segments).catch(reportError);
     else if (message.type === 'focus') focusEditor();
     else if (message.type === 'saved') revision = Math.max(revision, message.revision);
+    else if (message.type === 'imageSaved') { pendingImages.get(message.request)?.resolve(message.src); pendingImages.delete(message.request); }
+    else if (message.type === 'imageFailed') { pendingImages.get(message.request)?.reject(new Error(message.message)); pendingImages.delete(message.request); }
   },
 };
 
@@ -317,11 +391,109 @@ document.addEventListener('click', event => {
   post({ type: 'open', href });
 }, true);
 
+// Tables and images get a Copy button on hover. A table copies as tab-separated
+// text and an HTML table, which Sheets and Excel paste as rows and columns.
+const cell = (text: string) => text.trim().replace(/\\\|/g, '|');
+function escapeHtml(text: string) { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function inlineHtml(text: string): string {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*])\*(?!\s)(.+?)\*/g, '$1<i>$2</i>')
+    .replace(/~~(.+?)~~/g, '<s>$1</s>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+}
+const plainText = (text: string) => text.replace(/\*\*(.+?)\*\*/g, '$1').replace(/(^|[^*])\*(?!\s)(.+?)\*/g, '$1$2').replace(/~~(.+?)~~/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1');
+
+/** A Markdown pipe table as rows of cells, separator row dropped. */
+export function tableRows(markdown: string): string[][] {
+  return markdown.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('|'))
+    .map(line => line.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell))
+    .filter(row => !row.every(value => /^:?-{2,}:?$/.test(value)));
+}
+
+export function tableClipboard(markdown: string): { text: string; html: string } {
+  const rows = tableRows(markdown);
+  const text = rows.map(row => row.map(value => plainText(value).replace(/\t/g, ' ')).join('\t')).join('\n');
+  const html = `<table>${rows.map((row, index) => `<tr>${row.map(value => index === 0 ? `<th>${inlineHtml(value)}</th>` : `<td>${inlineHtml(value)}</td>`).join('')}</tr>`).join('')}</table>`;
+  return { text, html };
+}
+
+function writeClipboard(text: string, html: string) {
+  const onCopy = (event: ClipboardEvent) => {
+    event.preventDefault();
+    event.clipboardData?.setData('text/plain', text);
+    event.clipboardData?.setData('text/html', html);
+  };
+  document.addEventListener('copy', onCopy, { once: true, capture: true });
+  if (!document.execCommand('copy')) document.removeEventListener('copy', onCopy, true);
+}
+
+async function blobBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return btoa(binary);
+}
+
+/** PNG is the one image type every Mac app pastes. */
+async function asPng(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width; canvas.height = bitmap.height;
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+  return new Promise((resolve, reject) => canvas.toBlob(png => png ? resolve(png) : reject(new Error('Could not convert the image')), 'image/png'));
+}
+
+const copyChip = document.querySelector<HTMLButtonElement>('.copy-chip')!;
+let copyTarget: HTMLElement | null = null;
+host.addEventListener('mousemove', event => {
+  const target = (event.target as HTMLElement | null)?.closest<HTMLElement>('affine-image, affine-database');
+  if (target === copyTarget) return;
+  copyTarget = target ?? null;
+  if (!copyTarget) { copyChip.hidden = true; return; }
+  const box = copyTarget.getBoundingClientRect();
+  copyChip.style.top = `${Math.max(box.top + 8, 8)}px`;
+  copyChip.style.left = `${box.right - 8}px`;
+  copyChip.textContent = copyTarget.localName === 'affine-image' ? 'Copy image' : 'Copy table';
+  copyChip.hidden = false;
+});
+host.addEventListener('scroll', () => { copyChip.hidden = true; copyTarget = null; });
+copyChip.addEventListener('mousedown', event => event.preventDefault());
+copyChip.addEventListener('click', () => void copyBlock().catch(reportError));
+
+async function copyBlock() {
+  const state = current;
+  const id = copyTarget?.dataset.blockId;
+  if (!state || !id) return;
+  const model = state.doc.getBlock(id)?.model as (BlockModel & { sourceId?: string }) | undefined;
+  if (!model) return;
+  if (model.flavour === 'affine:image') {
+    const blob = model.sourceId ? await state.doc.blobSync.get(model.sourceId) : null;
+    if (!blob) return;
+    post({ type: 'copyImage', data: await blobBase64(await asPng(blob)) });
+  } else {
+    // An unedited table copies from the note's own Markdown, which keeps
+    // formatting the table block drops (inline code in cells, for one).
+    const segment = state.segmentOf.get(id);
+    const original = segment !== undefined && !state.dirty.has(segment) && state.original.get(segment)?.length === 1
+      ? state.segments.find(entry => entry.id === segment)?.text
+      : undefined;
+    const { text, html } = tableClipboard(original ?? await serializeRun(state, [id]));
+    writeClipboard(text, html);
+  }
+  copyChip.textContent = 'Copied';
+}
+
 const sample = '# Welcome to Brainz notes\n\nType `/` for blocks, drag the handle to move them. Links like [the plan](plan.md) open in Brainz.\n\n## This week\n\n- [ ] Try a checklist\n- [x] Done already\n\n> Notes save back to Markdown.\n\n```ts\nconst saved = true;\n```\n\n1. First\n2. Second\n';
 if (import.meta.env.DEV || !window.ipc) {
   window.__brainzNote = {
     load: (markdown: string, readOnly = false) => load('preview.md', readOnly, splitMarkdown(markdown)),
     render: () => current ? render(current) : Promise.resolve(''),
+    tableClipboard,
     get state() { return current; },
     editor,
   };
