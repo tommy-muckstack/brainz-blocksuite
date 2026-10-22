@@ -47,6 +47,7 @@ function fitTitle() {
   const style = getComputedStyle(title);
   titleRuler.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
   const text = title.value || title.placeholder || 'Untitled canvas';
+  title.title = text;
   const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + 2;
   title.style.width = `${Math.ceil(titleRuler.measureText(text).width) + padding + 4}px`;
 }
@@ -437,6 +438,14 @@ async function receive(message: Record<string,unknown>) {
         const metadata=editor.doc.spaceDoc.getMap<Record<string,unknown>>('brainz:meta');
         metadata.set(object.id,{...metadata.get(object.id),ocr:message.text.slice(0,100000)});
       }
+      break;
+    }
+    case 'pasteImage': {
+      try {
+        const position = message.position as [number,number];
+        const name = `Screenshot · ${new Date().toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}`;
+        await addFile({title:name,url:'',image:{mime:String(message.mime),data:String(message.data)}},position);
+      } catch (error) { notice(`Could not paste the image: ${String(error)}`); }
       break;
     }
     case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
