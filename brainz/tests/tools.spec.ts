@@ -83,6 +83,23 @@ test('Pasting a screenshot creates a persistent image with locally recognized te
   expect(await page.evaluate(()=>(window.__brainzBoard as any).agent.read().objects.find((object:any)=>object.kind==='image')?.image?.ocr)).toBe('Text from the screenshot');
 });
 
+test('A screenshot omitted from the WebView paste event uses the native clipboard',async({page})=>{
+  await open(page);
+  await page.evaluate(()=>{
+    const canvas=document.createElement('canvas');canvas.width=120;canvas.height=80;canvas.getContext('2d')!.fillRect(0,0,120,80);
+    const image=canvas.toDataURL('image/png').split(',')[1];
+    const ipc=window.ipc!;
+    window.ipc={postMessage(value:string){
+      const message=JSON.parse(value);
+      if(message.type==='pasteClipboard') queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail:{type:'pasteImage',position:message.position,mime:'image/png',data:image}})));
+      else ipc.postMessage(value);
+    }};
+    document.dispatchEvent(new ClipboardEvent('paste',{clipboardData:new DataTransfer(),bubbles:true,cancelable:true}));
+  });
+  await expect(page.locator('affine-edgeless-image img')).toBeVisible();
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.flavour==='affine:image').length)).toBe(1);
+});
+
 test('Quick-create dots connect new shapes and stickies, focus text, and offer keyboard choices after a drag',async({page})=>{
   await open(page);
   await page.keyboard.press('n');await page.mouse.click(330,240);await page.keyboard.type('First');await page.keyboard.press('Meta+Enter');
