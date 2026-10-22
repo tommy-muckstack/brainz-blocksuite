@@ -67,7 +67,7 @@
       },
       {
         "find": "            const shapeButtons = repeat(ShapeComponentConfig, ({ name, generalIcon, scribbledIcon, tooltip }) => html `\n        <edgeless-tool-icon-button\n          .tooltip=${tooltip}\n          @pointerenter=${() => this._showOverlay(name)}\n          @pointerleave=${() => this._removeOverlay()}\n          @click=${() => this._autoComplete(name)}\n        >\n          ${currentSourceStyle === 'General' ? generalIcon : scribbledIcon}\n        </edgeless-tool-icon-button>\n      `);\n            return html `<div class=\"auto-complete-panel-container\" style=${style}>\n      ${shapeButtons}\n\n      <edgeless-tool-icon-button\n        .tooltip=${'Text'}\n        @pointerenter=${() => this._showOverlay('text')}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete('text')}\n      >\n        ${FontFamilyIcon}\n      </edgeless-tool-icon-button>\n      <edgeless-tool-icon-button\n        .tooltip=${'Note'}\n        @pointerenter=${() => this._showOverlay('note')}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete('note')}\n      >\n        ${SmallNoteIcon}\n      </edgeless-tool-icon-button>\n      <edgeless-tool-icon-button\n        .tooltip=${'Frame'}\n        @pointerenter=${() => this._showOverlay('frame')}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete('frame')}\n      >\n        ${FrameIcon}\n      </edgeless-tool-icon-button>\n\n      <edgeless-tool-icon-button\n        .iconContainerPadding=${0}\n        .tooltip=${capitalizeFirstLetter(currentSourceType)}\n        @pointerenter=${() => this._showOverlay(currentSourceType)}\n        @pointerleave=${() => this._removeOverlay()}\n        @click=${() => this._autoComplete(currentSourceType)}\n      >\n        <div class=\"row-button\">Add a same object</div>\n      </edgeless-tool-icon-button>\n    </div>`;",
-        "replace": "            const choices=[[currentSourceType,'Same object','\u21b5'],['note','Sticky','2'],['text','Text','3'],['roundedRect','Box','4'],['ellipse','Ellipse','5'],['diamond','Diamond','6'],['frame','Frame','7']];\n            const icon=type=>type==='note'?SmallNoteIcon:type==='text'?FontFamilyIcon:type==='frame'?FrameIcon:ShapeComponentConfig.find(shape=>shape.name===type)?.generalIcon;\n            return html`<div class=\"auto-complete-panel-container\" style=${style} role=\"menu\" aria-label=\"Add connected object\">\n              ${choices.map(([type,label,key])=>html`<button class=\"brainz-option\" role=\"menuitem\" @pointerenter=${()=>this._showOverlay(type)} @pointerleave=${()=>this._removeOverlay()} @click=${()=>this._autoComplete(type)}>${icon(type)}<span>${label}</span><kbd>${key}</kbd></button>`)}\n            </div>`;"
+        "replace": "            const choices=[[currentSourceType,'Same object','↵'],['note','Sticky','2'],['text','Text','3'],['roundedRect','Box','4'],['ellipse','Ellipse','5'],['diamond','Diamond','6'],['frame','Frame','7']];\n            const icon=type=>type==='note'?SmallNoteIcon:type==='text'?FontFamilyIcon:type==='frame'?FrameIcon:ShapeComponentConfig.find(shape=>shape.name===type)?.generalIcon;\n            return html`<div class=\"auto-complete-panel-container\" style=${style} role=\"menu\" aria-label=\"Add connected object\">\n              ${choices.map(([type,label,key])=>html`<button class=\"brainz-option\" role=\"menuitem\" @pointerenter=${()=>this._showOverlay(type)} @pointerleave=${()=>this._removeOverlay()} @click=${()=>this._autoComplete(type)}>${icon(type)}<span>${label}</span><kbd>${key}</kbd></button>`)}\n            </div>`;"
       },
       {
         "find": "width: 136px;",
@@ -118,6 +118,20 @@
       {
         "find": "                else {\n                    ctx.lineTo(point[0], point[1]);\n                }",
         "replace": "                else if(model.mode===ConnectorMode.Orthogonal && index<points.length-1) {\n                    const previous=points[index-1],next=points[index+1];\n                    const radius=Math.min(10,Math.hypot(point[0]-previous[0],point[1]-previous[1])/2,Math.hypot(next[0]-point[0],next[1]-point[1])/2);\n                    ctx.arcTo(point[0],point[1],next[0],next[1],radius);\n                } else {\n                    ctx.lineTo(point[0], point[1]);\n                }"
+      }
+    ]
+  },
+  {
+    "file": "dist/_common/adapters/markdown/markdown.js",
+    "originalHash": "85ea0e15635b0ae2eaac3c24977ba2f17f2964c0544bc82f84b6454c4973e775",
+    "replacements": [
+      {
+        "find": ".use(remarkMath)\n            .stringify(ast)",
+        "replace": ".use(globalThis.__brainzMarkdownMath === false ? () => {} : remarkMath)\n            .stringify(ast)"
+      },
+      {
+        "find": ".use(remarkMath)\n            .parse(markdown)",
+        "replace": ".use(globalThis.__brainzMarkdownMath === false ? () => {} : remarkMath)\n            .parse(markdown)"
       }
     ]
   }
