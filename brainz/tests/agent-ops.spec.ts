@@ -205,3 +205,49 @@ test('New notes and groups can be updated later in the same batch and undone tog
   expect(note.xywh.slice(0,2)).toEqual([100,100]);
   await page.getByRole('button',{name:'Undo',exact:true}).click(); expect(await objects(page)).toEqual([]);
 });
+
+test('Agents place brain images on the canvas at their natural size', async ({ page }) => {
+  const { readFileSync } = await import('node:fs');
+  const { dirname, join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const pixel = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/pixel.png'));
+  const requested: string[] = [];
+  await page.route('**/brain-file?*', route => {
+    const path = new URL(route.request().url()).searchParams.get('path') ?? '';
+    requested.push(path);
+    return path.endsWith('missing.png') ? route.fulfill({ status: 404, body: '' }) : route.fulfill({ status: 200, contentType: 'image/png', body: pixel });
+  });
+  await open(page);
+  expect((await submit(page, batch([{ op: 'create', type: 'image', path: '../secret.png' }], { batchId: 'escape' }))).status).toBe('rejected');
+  expect((await submit(page, batch([{ op: 'create', type: 'image', path: 'notes/plan.md' }], { batchId: 'not-image' }))).status).toBe('rejected');
+  expect((await submit(page, batch([{ op: 'create', type: 'image', path: 'attachments/view.png', caption: 'The view', at: [100, 50] }], { batchId: 'image' }))).status).toBe('staged');
+  await expect.poll(() => requested).toContain('attachments/view.png');
+  await page.waitForTimeout(300);
+  expect((await page.evaluate(() => (window.__brainzBoard as any).agent.decide('image', true))).status).toBe('applied');
+  const placed = (await objects(page)).filter((object: { kind: string }) => object.kind === 'image');
+  expect(placed).toHaveLength(1);
+  expect(placed[0].xywh).toEqual([100, 50, 40, 24]);
+
+  expect((await submit(page, batch([{ op: 'create', type: 'image', path: 'attachments/missing.png' }], { batchId: 'missing' }))).status).toBe('staged');
+  await page.waitForTimeout(300);
+  const missing = await page.evaluate(() => (window.__brainzBoard as any).agent.decide('missing', true));
+  expect(missing.status).toBe('rejected');
+  expect(String(missing.message)).toContain('could not be loaded');
+});
+
+test('A canvas an agent creates opens empty and takes proposals', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.ipc = { postMessage(value: string) {
+      const message = JSON.parse(value);
+      if (message.type === 'ready') queueMicrotask(() => window.dispatchEvent(new CustomEvent('brainz', { detail: { type: 'load',
+        document: { format: 'brainz-whiteboard', version: 1, id: 'board-new', title: 'Launch plan', data: 'AAA=' },
+        target: { path: '/brain/Canvases/Launch plan.brainzboard' }, workspace: '/brain', agentEnabled: true } })));
+      if (message.type === 'save') queueMicrotask(() => window.dispatchEvent(new CustomEvent('brainz', { detail: { type: 'saved', revision: message.revision } })));
+    } };
+  });
+  await page.goto('/'); await page.waitForFunction(() => Boolean((window.__brainzBoard as any)?.agent));
+  expect(await objects(page)).toEqual([]);
+  expect((await submit(page, batch([{ op: 'create', type: 'sticky', text: 'First idea' }], { batchId: 'first' }))).status).toBe('staged');
+  expect((await page.evaluate(() => (window.__brainzBoard as any).agent.decide('first', true))).status).toBe('applied');
+  expect(await objects(page)).toHaveLength(1);
+});

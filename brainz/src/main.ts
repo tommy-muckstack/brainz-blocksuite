@@ -17,7 +17,7 @@ import { installCapture, installSelectionCapture, renderCapture } from './captur
 import { CanvasNoteTool, CanvasSelectTool, createNote } from './interactions';
 import { describeScene } from './scene';
 import { CanvasConnectionOverlay, CanvasEditPropsStore } from './canvas-overrides';
-import { CanvasAgent } from './canvas-agent';
+import { CanvasAgent, type PreparedImage } from './canvas-agent';
 import { CanvasStorage, documentUpdate, hydrateImages } from './storage';
 import { icon, mountShell } from './shell';
 import { CanvasTools } from './tools';
@@ -170,6 +170,24 @@ function addLink(reference: LinkReference, position?: [number,number]) {
   service.selection.set({elements:[id],editing:false});
   selectTool('pointer'); save(); updateEmpty(); return id;
 }
+/** An image in the brain stored like a pasted one, for an agent proposal to place. */
+async function brainImage(path: string): Promise<PreparedImage> {
+  const response = await fetch(`brain-file?path=${encodeURIComponent(path)}`);
+  if (!response.ok) throw new Error('not found in this brain');
+  const blob = await response.blob();
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const limit = storage.enabled ? 25 : 8;
+  if (bytes.length > limit*1024*1024 || !['image/png','image/jpeg','image/webp','image/gif'].includes(blob.type)) throw new Error(`use a PNG, JPEG, WebP, or GIF under ${limit} MB`);
+  const asset = {mime:blob.type,data:bytesToBase64(bytes)};
+  const bitmap = await createImageBitmap(blob);
+  const size = {width:bitmap.width,height:bitmap.height};
+  bitmap.close();
+  const sourceId = storage.enabled ? await storage.putImage(asset,path.split('/').pop() ?? path) : `image-${collection.idGenerator()}`;
+  await editor.doc.blobSync.set(sourceId,new Blob([bytes],{type:asset.mime}));
+  loadedImages.add(sourceId);
+  if (!storage.enabled) images[sourceId] = asset;
+  return {sourceId,size:bytes.length,...size};
+}
 async function addFile(reference: LinkReference, position: [number,number]) {
   if (!reference.image) { addLink(reference,position); return; }
   const asset = reference.image;
@@ -307,7 +325,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   installCapture(editor,service,png=>post({type:'copyImage',png}),notice);
   installSelectionCapture(editor,service,png=>post({type:'copyImage',png}),notice);
   if (agentEnabled) {
-    agent = new CanvasAgent({editor,service,links,boardId,target:()=>target,title:()=>title.value,workspace:workspaceRoot,post,notice,save});
+    agent = new CanvasAgent({editor,service,links,boardId,target:()=>target,title:()=>title.value,workspace:workspaceRoot,post,notice,save,prepareImage:brainImage});
     const label = window.document.createElement('label'); label.className = 'canvas-agent-permission';
     const toggle = window.document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = agent.allowDirect;
     toggle.onchange = () => { if (agent) { agent.allowDirect = toggle.checked; save(); } };

@@ -6,6 +6,8 @@ export interface CanvasObject {
   id: string; kind: ObjectKind; xywh: Box; text: string; version: string;
   color?: string; shape?: string; rotate?: number; parent?: string; url?: string;
   from?: string; to?: string; mode?: string; arrow?: string; children?: string[];
+  /** An image's file, relative to the brain; size 0×0 means its natural size. */
+  path?: string;
 }
 export interface OpBatch {
   format: 'brainz-canvas-ops'; version: 1; batchId: string; actor: string;
@@ -137,11 +139,11 @@ export function prepareBatch(input: unknown, existing: CanvasObject[], context: 
       if (op.ifExists !== undefined && typeof op.ifExists !== 'boolean') throw new OpError('invalid', 'ifExists must be a boolean');
       switch (op.op) {
         case 'create': case 'connect': case 'group': {
-          const kind = op.op === 'connect' ? 'connector' : op.op === 'group' ? 'group' : choice(op.type, ['sticky', 'text', 'shape', 'frame', 'card'], 'object type');
+          const kind = op.op === 'connect' ? 'connector' : op.op === 'group' ? 'group' : choice(op.type, ['sticky', 'text', 'shape', 'frame', 'card', 'image'], 'object type');
           const id = `staged:${batch.batchId}:${index}`;
           if (objects.has(id)) throw new OpError('invalid', 'Duplicate object id');
           const at = point(op.at ?? [0, 0], 'position');
-          const size = point(op.size ?? (kind === 'frame' ? [800, 500] : kind === 'sticky' ? [280, 200] : [240, 120]), 'size', true);
+          const size: [number, number] = kind === 'image' && op.size === undefined ? [0, 0] : point(op.size ?? (kind === 'frame' ? [800, 500] : kind === 'sticky' ? [280, 200] : [240, 120]), 'size', true);
           const parent = op.parent === undefined ? undefined : requireObject(op.parent, {});
           if (parent && parent.kind !== 'frame') throw new OpError('invalid', 'parent must be a frame');
           const object: CanvasObject = {
@@ -149,6 +151,13 @@ export function prepareBatch(input: unknown, existing: CanvasObject[], context: 
             text: string(op.text ?? op.title ?? op.label ?? '', 'text'), version: `${batch.batchId}:${index}`, parent: parent?.id,
             color: choice(op.color ?? (kind === 'shape' ? 'black' : kind === 'frame' ? 'transparent' : kind === 'text' ? 'white' : kind === 'connector' ? 'green' : 'amber'), Object.keys(palette), 'color'),
           };
+          if (kind === 'image') {
+            const path = string(op.path, 'path', 4096);
+            if (!context.workspace || path.startsWith('/') || path.split('/').some(part => part === '..' || part === '.')) throw new OpError('forbidden', 'Use a path relative to this brain');
+            if (!/\.(png|jpe?g|gif|webp)$/i.test(path)) throw new OpError('invalid', 'Images must be PNG, JPEG, GIF or WebP files');
+            object.path = path;
+            object.text = string(op.caption ?? op.text ?? '', 'caption');
+          }
           if (kind === 'shape') object.shape = choice(op.shape ?? 'roundedRect', ['rect', 'roundedRect', 'diamond', 'ellipse', 'triangle'], 'shape');
           if (kind === 'card') {
             if (op.path !== undefined) {
