@@ -512,7 +512,10 @@ export function tableRows(markdown: string): string[][] {
 export function tableClipboard(markdown: string): { text: string; html: string } {
   const rows = tableRows(markdown);
   const text = rows.map(row => row.map(value => plainText(value).replace(/\t/g, ' ')).join('\t')).join('\n');
-  const html = `<table>${rows.map((row, index) => `<tr>${row.map(value => index === 0 ? `<th>${inlineHtml(value)}</th>` : `<td>${inlineHtml(value)}</td>`).join('')}</tr>`).join('')}</table>`;
+  // Explicit colours: WebKit otherwise stamps the note's light text colour
+  // onto the copy, which pastes as white-on-white in a spreadsheet.
+  const cellStyle = 'border:1px solid #d0d0d0;padding:4px 8px;text-align:left;vertical-align:top';
+  const html = `<table style="border-collapse:collapse;color:#000000;background:#ffffff;font-family:Arial,sans-serif;font-size:11pt">${rows.map((row, index) => `<tr>${row.map(value => index === 0 ? `<th style="${cellStyle};font-weight:bold;background:#f3f3f3">${inlineHtml(value)}</th>` : `<td style="${cellStyle}">${inlineHtml(value)}</td>`).join('')}</tr>`).join('')}</table>`;
   return { text, html };
 }
 

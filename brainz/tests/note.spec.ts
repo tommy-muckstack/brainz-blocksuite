@@ -217,7 +217,16 @@ test('a table copies as rows and columns for spreadsheets', async ({ page }) => 
   await expect(chip).toHaveText('Copied');
   const copied = await page.evaluate(() => (window as unknown as { copied?: { text: string; html: string } }).copied);
   expect(copied?.text).toBe('Name\tAmount\nRent\t$1,200\nFood\t$300');
-  expect(copied?.html).toBe('<table><tr><th>Name</th><th>Amount</th></tr><tr><td><b>Rent</b></td><td>$1,200</td></tr><tr><td>Food</td><td><code>$300</code></td></tr></table>');
+  const cells = await page.evaluate(html => {
+    const table = new DOMParser().parseFromString(html, 'text/html').querySelector('table')!;
+    return { color: table.style.color, rows: [...table.rows].map(row => [...row.cells].map(cell => `${cell.localName}:${cell.innerHTML}`)) };
+  }, copied?.html ?? '');
+  expect(cells.color).toBe('rgb(0, 0, 0)');
+  expect(cells.rows).toEqual([
+    ['th:Name', 'th:Amount'],
+    ['td:<b>Rent</b>', 'td:$1,200'],
+    ['td:Food', 'td:<code>$300</code>'],
+  ]);
 });
 
 test('an image offers Copy image', async ({ page }) => {
