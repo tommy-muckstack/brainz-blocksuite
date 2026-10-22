@@ -14,6 +14,9 @@ affine-paragraph,affine-list { line-height:1.7; }
 .affine-paragraph-block-container [contenteditable], rich-text { caret-color:#e2c76b; }
 affine-link a, .affine-link { color:#e2c76b!important; text-decoration-color:#e2c76b66!important; }
 .note-actions { position:fixed; z-index:20; top:12px; right:16px; display:flex; gap:6px; }
+.rename-button { padding:5px 10px; border:1px solid #e2c76b55; border-radius:8px; background:#22221fcc; color:#e2c76b; font:500 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rename-button[hidden] { display:none; }
+.rename-button:hover { border-color:#e2c76b; }
 .history-button { padding:5px 10px; border:1px solid #3b3b34; border-radius:8px; background:#22221fcc; color:#99988e; font:500 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); }
 .history-button:hover { color:#e5e3da; border-color:#5a584c; }
 .source-toggle { display:flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid #3b3b34; border-radius:8px; background:#22221fcc; color:#99988e; font:500 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); }
