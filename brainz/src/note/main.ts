@@ -5,6 +5,9 @@ import { AffineSchemas, AffineSlashMenuWidget, MarkdownAdapter, ThemeProvider } 
 import { DocCollection, Job, Schema, Text, type BlockModel, type Doc } from '@blocksuite/store';
 import { ColorScheme, FontFamily } from '@blocksuite/affine-model';
 import { FontConfigExtension, FontLoaderService } from '@blocksuite/affine-shared/services';
+import { LinkedDocIcon } from '@blocksuite/affine-components/icons';
+import { ConfigExtension } from '@blocksuite/block-std';
+import type { InlineEditor } from '@blocksuite/inline';
 import { combinedDarkCssVariables } from '@toeverything/theme';
 import * as Y from 'yjs';
 import { assemble, isContent, type Segment, type TopBlock } from './segments';
@@ -20,7 +23,13 @@ type Incoming =
   | { type: 'focus' }
   | { type: 'saved'; revision: number }
   | { type: 'imageSaved'; request: number; src: string }
-  | { type: 'imageFailed'; request: number; message: string };
+  | { type: 'imageFailed'; request: number; message: string }
+  | { type: 'notes'; current: string; notes: NoteEntry[] }
+  | { type: 'backlinks'; items: Backlink[] };
+
+/** A note in the brain, by its path from the brain's folder. */
+export interface NoteEntry { path: string; title: string }
+export interface Backlink { path: string; title: string; snippet: string }
 
 declare global {
   interface Window {
@@ -80,10 +89,62 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = '<main id="note" aria-label="Note"></main><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button><button class="copy-chip" type="button" hidden>Copy</button>';
 const host = document.getElementById('note')!;
 
+let notes: NoteEntry[] = [];
+let notePath = 'preview.md';
+
+/** The Markdown link from one note to another, both given from the brain's folder. */
+export function relativeLink(from: string, to: string): string {
+  const fromFolder = from.split('/').slice(0, -1);
+  const target = to.split('/');
+  let common = 0;
+  while (common < fromFolder.length && common < target.length - 1 && fromFolder[common] === target[common]) common++;
+  return [...fromFolder.slice(common).map(() => '..'), ...target.slice(common)].map(encodeURIComponent).join('/');
+}
+
+/** Notes whose title or path holds every word typed, best first. */
+export function matchNotes(query: string, entries: NoteEntry[], exclude: string, limit = 8): NoteEntry[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const lower = query.trim().toLowerCase();
+  return entries
+    .filter(entry => entry.path !== exclude)
+    .filter(entry => { const haystack = `${entry.title} ${entry.path}`.toLowerCase(); return words.every(word => haystack.includes(word)); })
+    .map(entry => ({ entry, rank: entry.title.toLowerCase().startsWith(lower) ? 0 : entry.title.toLowerCase().includes(lower) ? 1 : 2 }))
+    .sort((a, b) => a.rank - b.rank || a.entry.path.length - b.entry.path.length || a.entry.path.localeCompare(b.entry.path))
+    .slice(0, limit)
+    .map(({ entry }) => entry);
+}
+
+function insertNoteLink(inlineEditor: InlineEditor, note: NoteEntry) {
+  const range = inlineEditor.getInlineRange();
+  if (!range) return;
+  const title = note.title || note.path.split('/').pop()!.replace(/\.md$/i, '');
+  inlineEditor.insertText({ index: range.index, length: 0 }, title, { link: relativeLink(notePath, note.path) } as never);
+  inlineEditor.insertText({ index: range.index + title.length, length: 0 }, ' ');
+  inlineEditor.setInlineRange({ index: range.index + title.length + 1, length: 0 });
+}
+
 const collection = new DocCollection({ id: 'brainz-note', schema: new Schema().register(AffineSchemas) });
 collection.meta.initialize();
 const editor = new PageEditor();
-editor.specs = [...editor.specs, FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal', 'italic'].flatMap(style => ['300', '400', '500', '600', '700'].map(weight => ({ font, style, weight, url: `fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf` })))))];
+// "[[" lists the brain's notes and inserts a Markdown link to the one picked.
+const notesMenu = ConfigExtension('affine:page', {
+  linkedWidget: {
+    triggerKeys: ['[['],
+    convertTriggerKey: false,
+    ignoreBlockTypes: ['affine:code'],
+    getMenus: (query: string, abort: () => void, _host: unknown, inlineEditor: InlineEditor) => Promise.resolve([{
+      name: notes.length ? 'Link to a note' : 'No notes found',
+      items: matchNotes(query, notes, notePath).map(note => ({
+        key: note.path,
+        name: note.title,
+        icon: LinkedDocIcon,
+        action: () => { abort(); insertNoteLink(inlineEditor, note); },
+      })),
+      maxDisplay: 8,
+    }]),
+  },
+});
+editor.specs = [...editor.specs, notesMenu, FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal', 'italic'].flatMap(style => ['300', '400', '500', '600', '700'].map(weight => ({ font, style, weight, url: `fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf` })))))];
 
 interface Loaded {
   doc: Doc;
@@ -288,6 +349,8 @@ function reportError(error: unknown) {
 
 async function load(path: string, readOnly: boolean, segments: Segment[]) {
   const token = ++generation;
+  // Another note's backlinks must not linger; Brainz sends this note's next.
+  if (document.title !== (path.split('/').pop() || 'Note')) renderBacklinks([]);
   const scroll = host.scrollTop;
   const hadFocus = host.contains(document.activeElement);
   const doc = collection.createDoc({ id: `note-${token}` });
@@ -320,7 +383,7 @@ async function load(path: string, readOnly: boolean, segments: Segment[]) {
   document.body.classList.toggle('read-only', readOnly);
   document.title = path.split('/').pop() || 'Note';
   editor.doc = doc;
-  if (!editor.isConnected) host.append(editor);
+  if (!editor.isConnected) host.prepend(editor);
   await editor.updateComplete;
   await editor.std.get(FontLoaderService).ready;
   editor.std.get(ThemeProvider).app$.value = ColorScheme.Dark;
@@ -358,6 +421,8 @@ window.brainzNote = {
     if (message.type === 'load') void load(message.path, message.readOnly, message.segments).catch(reportError);
     else if (message.type === 'focus') focusEditor();
     else if (message.type === 'saved') revision = Math.max(revision, message.revision);
+    else if (message.type === 'notes') { notes = message.notes; notePath = message.current; }
+    else if (message.type === 'backlinks') renderBacklinks(message.items);
     else if (message.type === 'imageSaved') { pendingImages.get(message.request)?.resolve(message.src); pendingImages.delete(message.request); }
     else if (message.type === 'imageFailed') { pendingImages.get(message.request)?.reject(new Error(message.message)); pendingImages.delete(message.request); }
   },
@@ -390,6 +455,36 @@ document.addEventListener('click', event => {
   event.preventDefault(); event.stopPropagation();
   post({ type: 'open', href });
 }, true);
+
+// "Mentioned in" lists the notes that link here. It sits under the note and
+// is never part of the saved Markdown.
+const backlinks = document.createElement('aside');
+backlinks.className = 'backlinks';
+backlinks.hidden = true;
+function renderBacklinks(items: Backlink[]) {
+  backlinks.replaceChildren();
+  backlinks.hidden = items.length === 0;
+  document.body.classList.toggle('has-backlinks', items.length > 0);
+  if (!items.length) return;
+  const heading = document.createElement('h2');
+  heading.textContent = `Mentioned in ${items.length} ${items.length === 1 ? 'note' : 'notes'}`;
+  backlinks.append(heading);
+  for (const item of items) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'backlink';
+    const title = document.createElement('strong');
+    title.textContent = item.title;
+    const path = document.createElement('span');
+    path.textContent = item.path;
+    const snippet = document.createElement('p');
+    snippet.textContent = item.snippet;
+    row.append(title, path, snippet);
+    row.addEventListener('click', () => post({ type: 'open', href: relativeLink(notePath, item.path) }));
+    backlinks.append(row);
+  }
+  if (!backlinks.isConnected) host.append(backlinks);
+}
 
 // Tables and images get a Copy button on hover. A table copies as tab-separated
 // text and an HTML table, which Sheets and Excel paste as rows and columns.
@@ -494,6 +589,7 @@ if (import.meta.env.DEV || !window.ipc) {
     load: (markdown: string, readOnly = false) => load('preview.md', readOnly, splitMarkdown(markdown)),
     render: () => current ? render(current) : Promise.resolve(''),
     tableClipboard,
+    receive: (message: Incoming) => window.brainzNote?.receive(message),
     get state() { return current; },
     editor,
   };

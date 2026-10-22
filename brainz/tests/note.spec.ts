@@ -238,3 +238,53 @@ test('an image offers Copy image', async ({ page }) => {
   await expect(chip).toHaveText('Copied');
   await expect.poll(() => posted).toContain('copyImage');
 });
+
+type Receiver = { receive(message: unknown): void };
+
+test('[[ links to another note with a Markdown link', async ({ page }) => {
+  await open(page);
+  const source = '# Plan\n\nTalk to\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await page.evaluate(() => (window as unknown as { __brainzNote: Receiver }).__brainzNote.receive({
+    type: 'notes',
+    current: 'work/plan.md',
+    notes: [
+      { path: 'work/plan.md', title: 'Plan' },
+      { path: 'people/Sam Lee.md', title: 'Sam Lee' },
+      { path: 'people/samantha.md', title: 'Samantha' },
+      { path: 'work/budget.md', title: 'Budget' },
+    ],
+  }));
+  await clickEnd(page, 'Talk to');
+  await page.keyboard.type(' [[sam');
+  const menu = page.locator('affine-linked-doc-popover');
+  await expect(menu).toContainText('Sam Lee');
+  await expect(menu).toContainText('Samantha');
+  await expect(menu).not.toContainText('Budget');
+  await page.keyboard.press('Enter');
+  const output = await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render());
+  expect(output).toBe('# Plan\n\nTalk to [Sam Lee](../people/Sam%20Lee.md) \n');
+});
+
+test('notes that link here are listed under the note', async ({ page }) => {
+  const posted: { type?: string; href?: string }[] = [];
+  page.on('console', async message => {
+    for (const argument of message.args()) {
+      const value = await argument.jsonValue().catch(() => null) as { type?: string; href?: string } | null;
+      if (value?.type) posted.push(value);
+    }
+  });
+  await open(page);
+  await roundTrip(page, '# Sam Lee\n\nNotes.\n');
+  await page.evaluate(() => {
+    const note = (window as unknown as { __brainzNote: Receiver }).__brainzNote;
+    note.receive({ type: 'notes', current: 'people/Sam Lee.md', notes: [] });
+    note.receive({ type: 'backlinks', items: [{ path: 'work/plan.md', title: 'Plan', snippet: 'Talk to Sam Lee about the budget' }] });
+  });
+  const list = page.locator('.backlinks');
+  await expect(list).toContainText('Mentioned in 1 note');
+  await expect(list).toContainText('Talk to Sam Lee about the budget');
+  await list.locator('.backlink').click();
+  await expect.poll(() => posted.find(message => message.type === 'open')?.href).toBe('../work/plan.md');
+  expect(await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render())).toBe('# Sam Lee\n\nNotes.\n');
+});

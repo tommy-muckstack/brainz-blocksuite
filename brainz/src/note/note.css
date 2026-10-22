@@ -30,3 +30,13 @@ affine-database-title { display:none!important; }
 .copy-chip { position:fixed; z-index:20; transform:translateX(-100%); padding:4px 9px; border:1px solid #3b3b34; border-radius:7px; background:#22221fe6; color:#e5e3da; font:500 12px/1.2 'Brainz Canvas',Gellix,sans-serif; cursor:pointer; backdrop-filter:blur(8px); }
 .copy-chip:hover { border-color:#e2c76b; }
 .copy-chip[hidden] { display:none; }
+.backlinks { max-width:760px; margin:0 auto; padding:24px 48px 40vh; border-top:1px solid #2c2c27; }
+/* With a backlinks list under the note, the room to scroll past the end moves below it. */
+body.has-backlinks .affine-page-root-block-container { padding-bottom:32px!important; }
+body.has-backlinks page-editor, body.has-backlinks .affine-page-viewport { min-height:0!important; height:auto!important; }
+.backlinks h2 { margin:0 0 10px; color:#99988e; font:600 12px/1.4 'Brainz Canvas',Gellix,sans-serif; text-transform:uppercase; letter-spacing:.06em; }
+.backlink { display:block; width:100%; margin:0 0 6px; padding:10px 12px; border:1px solid #2c2c27; border-radius:10px; background:#1b1b19; color:#e5e3da; text-align:left; font:inherit; cursor:pointer; }
+.backlink:hover { border-color:#e2c76b66; }
+.backlink strong { font-weight:600; margin-right:8px; }
+.backlink span { color:#77766d; font-size:12px; }
+.backlink p { margin:4px 0 0; color:#99988e; font-size:13px; line-height:1.5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
