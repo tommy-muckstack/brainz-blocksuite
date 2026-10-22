@@ -150,3 +150,150 @@ test('the Markdown button and links go to Brainz', async ({ page }) => {
   expect((await sent(page)).find(message => message.type === 'open')?.href).toBe('plans/plan.md');
   expect(page.url()).toContain('/note.html');
 });
+
+const pixel = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/pixel.png'));
+
+async function serveBrainImages(page: Page) {
+  const requested: string[] = [];
+  await page.route('**/brain-file?*', route => {
+    const path = new URL(route.request().url()).searchParams.get('path') ?? '';
+    requested.push(path);
+    return path.endsWith('missing.png')
+      ? route.fulfill({ status: 404, body: '' })
+      : route.fulfill({ status: 200, contentType: 'image/png', body: pixel });
+  });
+  return requested;
+}
+
+test('images in the brain show as images and come back unchanged', async ({ page }) => {
+  const requested = await serveBrainImages(page);
+  await open(page);
+  const source = '# Trip\n\n![The view|320](attachments/view.png)\n\n![](<photos/my shot.png>)\n\nInline ![tiny](a.png) stays text.\n\n![gone](missing.png)\n\n![web](https://example.com/a.png)\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await expect(page.locator('affine-image')).toHaveCount(2);
+  expect(requested).toEqual(expect.arrayContaining(['attachments/view.png', 'photos/my shot.png', 'missing.png']));
+  // Missing, inline and web images stay as Markdown text.
+  await expect(page.locator('affine-code')).toHaveCount(3);
+});
+
+test('a new image is saved beside the note and written as Markdown', async ({ page }) => {
+  await open(page);
+  const source = '# Trip\n\nBefore.\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  const output = await page.evaluate(async bytes => {
+    const note = (window as unknown as { __brainzNote: NoteHarness & { state: { doc: any; noteId: string } } }).__brainzNote;
+    const { doc, noteId } = note.state;
+    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
+    await doc.blobSync.set('pasted', blob);
+    doc.addBlock('affine:image', { sourceId: 'pasted', width: 200 }, noteId);
+    return note.render();
+  }, [...pixel]);
+  expect(output).toBe(`${source}\n![|200](attachments/image-1.png)\n`);
+});
+
+test('opening a note with images never schedules a write', async ({ page }) => {
+  await serveBrainImages(page);
+  await open(page);
+  await roundTrip(page, '# Trip\n\n![The view|320](attachments/view.png)\n\nAfter.\n');
+  await expect(page.locator('affine-image')).toHaveCount(1);
+  await page.waitForTimeout(1500);
+  expect(await page.evaluate(() => (window as unknown as { __brainzNote: { state?: { touched: boolean } } }).__brainzNote.state?.touched)).toBe(false);
+});
+
+test('a table copies as rows and columns for spreadsheets', async ({ page }) => {
+  await open(page);
+  const source = '| Name | Amount |\n| ---- | ------ |\n| **Rent** | $1,200 |\n| Food | `$300` |\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await page.evaluate(() => {
+    const captured = window as unknown as { copied?: { text: string; html: string } };
+    document.addEventListener('copy', event => {
+      captured.copied = { text: event.clipboardData?.getData('text/plain') ?? '', html: event.clipboardData?.getData('text/html') ?? '' };
+    });
+  });
+  await page.locator('affine-database').hover();
+  const chip = page.locator('.copy-chip');
+  await expect(chip).toHaveText('Copy table');
+  await chip.click();
+  await expect(chip).toHaveText('Copied');
+  const copied = await page.evaluate(() => (window as unknown as { copied?: { text: string; html: string } }).copied);
+  expect(copied?.text).toBe('Name\tAmount\nRent\t$1,200\nFood\t$300');
+  const cells = await page.evaluate(html => {
+    const table = new DOMParser().parseFromString(html, 'text/html').querySelector('table')!;
+    return { color: table.style.color, rows: [...table.rows].map(row => [...row.cells].map(cell => `${cell.localName}:${cell.innerHTML}`)) };
+  }, copied?.html ?? '');
+  expect(cells.color).toBe('rgb(0, 0, 0)');
+  expect(cells.rows).toEqual([
+    ['th:Name', 'th:Amount'],
+    ['td:<b>Rent</b>', 'td:$1,200'],
+    ['td:Food', 'td:<code>$300</code>'],
+  ]);
+});
+
+test('an image offers Copy image', async ({ page }) => {
+  await serveBrainImages(page);
+  const posted: string[] = [];
+  page.on('console', async message => {
+    for (const argument of message.args()) {
+      const value = await argument.jsonValue().catch(() => null) as { type?: string } | null;
+      if (value?.type) posted.push(value.type);
+    }
+  });
+  await open(page);
+  await roundTrip(page, '# Trip\n\n![The view](attachments/view.png)\n');
+  await page.locator('affine-image').hover();
+  const chip = page.locator('.copy-chip');
+  await expect(chip).toHaveText('Copy image');
+  await chip.click();
+  await expect(chip).toHaveText('Copied');
+  await expect.poll(() => posted).toContain('copyImage');
+});
+
+type Receiver = { receive(message: unknown): void };
+
+test('[[ links to another note with a Markdown link', async ({ page }) => {
+  await open(page);
+  const source = '# Plan\n\nTalk to\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await page.evaluate(() => (window as unknown as { __brainzNote: Receiver }).__brainzNote.receive({
+    type: 'notes',
+    current: 'work/plan.md',
+    notes: [
+      { path: 'work/plan.md', title: 'Plan' },
+      { path: 'people/Sam Lee.md', title: 'Sam Lee' },
+      { path: 'people/samantha.md', title: 'Samantha' },
+      { path: 'work/budget.md', title: 'Budget' },
+    ],
+  }));
+  await clickEnd(page, 'Talk to');
+  await page.keyboard.type(' [[sam');
+  const menu = page.locator('affine-linked-doc-popover');
+  await expect(menu).toContainText('Sam Lee');
+  await expect(menu).toContainText('Samantha');
+  await expect(menu).not.toContainText('Budget');
+  await page.keyboard.press('Enter');
+  const output = await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render());
+  expect(output).toBe('# Plan\n\nTalk to [Sam Lee](../people/Sam%20Lee.md) \n');
+});
+
+test('notes that link here are listed under the note', async ({ page }) => {
+  const posted: { type?: string; href?: string }[] = [];
+  page.on('console', async message => {
+    for (const argument of message.args()) {
+      const value = await argument.jsonValue().catch(() => null) as { type?: string; href?: string } | null;
+      if (value?.type) posted.push(value);
+    }
+  });
+  await open(page);
+  await roundTrip(page, '# Sam Lee\n\nNotes.\n');
+  await page.evaluate(() => {
+    const note = (window as unknown as { __brainzNote: Receiver }).__brainzNote;
+    note.receive({ type: 'notes', current: 'people/Sam Lee.md', notes: [] });
+    note.receive({ type: 'backlinks', items: [{ path: 'work/plan.md', title: 'Plan', snippet: 'Talk to Sam Lee about the budget' }] });
+  });
+  const list = page.locator('.backlinks');
+  await expect(list).toContainText('Mentioned in 1 note');
+  await expect(list).toContainText('Talk to Sam Lee about the budget');
+  await list.locator('.backlink').click();
+  await expect.poll(() => posted.find(message => message.type === 'open')?.href).toBe('../work/plan.md');
+  expect(await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render())).toBe('# Sam Lee\n\nNotes.\n');
+});
