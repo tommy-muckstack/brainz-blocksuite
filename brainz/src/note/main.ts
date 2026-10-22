@@ -292,6 +292,16 @@ window.addEventListener('keydown', event => {
   if (key === 's' && !event.shiftKey) { event.preventDefault(); void save().catch(reportError); }
   else if (key === 'm' && event.shiftKey) { event.preventDefault(); post({ type: 'source' }); }
 }, true);
+// AppKit can hand navigation keys to the page as text: function-key codes
+// (U+F700-U+F8FF) or control characters such as 0x01 for Home. A note never
+// wants those typed into it, so the input is dropped before BlockSuite sees it.
+const strayKeyText = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\uF700-\uF8FF]/;
+window.addEventListener('beforeinput', event => {
+  if (event.data && strayKeyText.test(event.data)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
 window.addEventListener('blur', () => { if (saveTimer) void save().catch(reportError); });
 host.addEventListener('focusout', () => { if (saveTimer) void save().catch(reportError); });
 // Links open through Brainz; the web view never navigates away from the note.

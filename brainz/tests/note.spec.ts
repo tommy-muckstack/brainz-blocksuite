@@ -55,6 +55,17 @@ test('typing into one paragraph rewrites only that paragraph', async ({ page }) 
   expect(output).toBe(source.replace('Second paragraph.', 'Second paragraph. More words.'));
 });
 
+test('navigation keys delivered as text never reach the note', async ({ page }) => {
+  await open(page);
+  const source = '# Plan\n\nSecond paragraph.\n';
+  expect(await roundTrip(page, source)).toBe(source);
+  await clickEnd(page, 'Second paragraph.');
+  for (const text of ['\u0001', '\u0004', '\uF700', '\uF729']) await page.keyboard.insertText(text);
+  await page.keyboard.type(' Still typing.');
+  const output = await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render());
+  expect(output).toBe(source.replace('Second paragraph.', 'Second paragraph. Still typing.'));
+});
+
 test('checklists, headings and quotes render as blocks', async ({ page }) => {
   await open(page);
   await roundTrip(page, '# Heading\n\n- [ ] open task\n- [x] done task\n\n> quoted\n');
