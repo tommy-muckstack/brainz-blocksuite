@@ -13,7 +13,10 @@ interface AgentOptions {
   editor: EdgelessEditor; service: EdgelessRootService; links: Y.Map<LinkReference>;
   target: () => BoardTarget; title: () => string; boardId: string; workspace?: string;
   post: (message: Record<string, unknown>) => void; notice: (message: string) => void; save: () => void;
+  /** Loads a brain image into the board's storage for a proposal to place. */
+  prepareImage?: (path: string) => Promise<PreparedImage>;
 }
+export interface PreparedImage { sourceId: string; width: number; height: number; size: number }
 const svgNamespace = 'http://www.w3.org/2000/svg';
 
 export class CanvasAgent {
@@ -32,6 +35,8 @@ export class CanvasAgent {
   private previous = new Map<string, string>();
   private eventTimer?: ReturnType<typeof setTimeout>;
   private applying = false;
+  /** Images a proposal places, loaded when it arrives so applying stays synchronous. */
+  private readonly images = new Map<string, PreparedImage | Error>();
 
   constructor(private readonly options: AgentOptions) {
     const { editor, service, links } = options;
@@ -150,9 +155,25 @@ export class CanvasAgent {
     if (result.status === 'rejected') return this.report(result);
     if (batch.mode === 'direct' && !this.allowDirect) return this.report({ ...result, status: 'rejected', message: 'Direct edits are disabled for this canvas. Submit a staged proposal.' });
     this.pending.set(batch.batchId, plan);
-    if (batch.mode === 'direct') return this.decide(batch.batchId, true);
+    const loading = this.loadImages(plan);
+    if (batch.mode === 'direct') {
+      if (!loading) return this.decide(batch.batchId, true);
+      void loading.then(() => { if (this.pending.has(batch.batchId)) this.decide(batch.batchId, true); });
+      return this.report(result);
+    }
     this.current ??= batch.batchId; this.render();
     return this.report(result);
+  }
+
+  private loadImages(plan: Plan): Promise<unknown> | undefined {
+    const wanted = plan.changes.flatMap(change => change.op === 'create' && change.object.kind === 'image' && change.object.path ? [change.object] : []);
+    if (!wanted.length) return undefined;
+    return Promise.all(wanted.map(async object => {
+      try {
+        if (!this.options.prepareImage) throw new Error('Images cannot be added here');
+        this.images.set(object.id, await this.options.prepareImage(object.path!));
+      } catch (error) { this.images.set(object.id, error instanceof Error ? error : new Error(String(error))); }
+    }));
   }
 
   status(batchId: string): BatchResult | undefined { return this.batches.get(batchId) ?? this.completed.get(batchId) ?? this.pending.get(batchId)?.result; }
@@ -271,6 +292,15 @@ export class CanvasAgent {
         frontEndpointStyle: ['start', 'both'].includes(object.arrow ?? '') ? PointStyle.Arrow : PointStyle.None,
         rearEndpointStyle: ['end', 'both'].includes(object.arrow ?? 'end') ? PointStyle.Arrow : PointStyle.None,
         stroke: color, strokeWidth: 2, text: new Y.Text(object.text), fontFamily: FontFamily.Inter, color: '#e5e3da' });
+    } else if (object.kind === 'image') {
+      const image = this.images.get(object.id);
+      if (!image) throw new Error(`${object.path} is still loading; apply again in a moment`);
+      if (image instanceof Error) throw new Error(`${object.path} could not be loaded: ${image.message}`);
+      const natural = object.xywh[2] <= 0 || object.xywh[3] <= 0;
+      const width = natural ? Math.min(520, image.width) : object.xywh[2];
+      const height = natural ? image.height * width / Math.max(1, image.width) : object.xywh[3];
+      id = doc.addBlock('affine:image', { sourceId: image.sourceId, size: image.size, width, height,
+        xywh: new Bound(object.xywh[0], object.xywh[1], width, height).serialize(), caption: object.text }, service.surface);
     } else if (object.kind === 'text') {
       id = service.surface.addElement({ type: 'text', index: service.generateIndex(), xywh, text: new Y.Text(object.text), fontFamily: FontFamily.Inter, fontSize: 20, color, hasMaxWidth: true });
     } else {
