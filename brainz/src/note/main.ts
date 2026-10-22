@@ -86,7 +86,7 @@ for (const [key, value] of Object.entries(theme)) document.documentElement.style
 }
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
-app.innerHTML = '<main id="note" aria-label="Note"></main><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button><button class="copy-chip" type="button" hidden>Copy</button>';
+app.innerHTML = '<main id="note" aria-label="Note"></main><div class="note-actions"><button class="history-button" type="button" title="See and restore earlier versions">History</button><button class="source-toggle" type="button" title="View Markdown source (⇧⌘M)">Markdown <kbd>⇧⌘M</kbd></button></div><button class="copy-chip" type="button" hidden>Copy</button>';
 const host = document.getElementById('note')!;
 
 let notes: NoteEntry[] = [];
@@ -429,6 +429,7 @@ window.brainzNote = {
 };
 
 document.querySelector('.source-toggle')!.addEventListener('click', () => post({ type: 'source' }));
+document.querySelector('.history-button')!.addEventListener('click', () => post({ type: 'history' }));
 window.addEventListener('keydown', event => {
   if (!event.metaKey) return;
   const key = event.key.toLowerCase();
