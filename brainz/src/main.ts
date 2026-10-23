@@ -306,7 +306,10 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   doc.spaceDoc.on('update',(update:Uint8Array,origin:unknown) => { storage.changed(update,origin); changed(); });
   service.viewport.viewportUpdated.on(({zoom}) => {
     get('zoom').textContent = `${Math.round(zoom*100)}%`;
-    if (!loading && !viewportTimer) viewportTimer = setTimeout(saveView,1000);
+    if (!loading) {
+      clearTimeout(viewportTimer);
+      viewportTimer = setTimeout(saveView,800);
+    }
   });
   await new Promise(requestAnimationFrame);
   const restoredView = localView ?? document?.viewport;
@@ -410,7 +413,7 @@ async function receive(message: Record<string,unknown>) {
         images = {...external.images,...images};
         Y.applyUpdate(editor.doc.spaceDoc,update,'external');
         if (external.version === 2 && external.storageStamp) post({type:'externalMerged',stamp:external.storageStamp});
-        baseHash = String(message.baseHash); save(); notice('External canvas changes merged');
+        baseHash = String(message.baseHash); save();
       } catch (error) {
         console.error(error);
         receive({type:'saveError',message:'Could not merge the external canvas. Saving a recovery copy of your local edits…'});
@@ -448,7 +451,9 @@ async function receive(message: Record<string,unknown>) {
       } catch (error) { notice(`Could not paste the image: ${String(error)}`); }
       break;
     }
-    case 'saveError': saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
+    case 'saveError':
+      if(String(message.message).startsWith('This canvas changed on disk. Merging the external changes')) break;
+      saveState.className='save-state failed'; saveState.textContent='Not saved · click to retry'; notice(String(message.message)); break;
     case 'notice': notice(String(message.message)); break;
     case 'files': {
       const files = message.files as LinkReference[];
@@ -506,7 +511,6 @@ title.oninput = () => { titleDirty = true; fitTitle(); changed(); post({type:'ti
 title.onblur = () => { flush(); if (titleDirty) { titleDirty = false; post({type:'titleCommitted',title:title.value}); } };
 saveState.onclick = save;
 window.addEventListener('pointerup',() => { if(saveTimer) save(); });
-window.addEventListener('keyup',() => { if(saveTimer) save(); });
 window.addEventListener('pagehide',() => { flush(); if (!loading && savedRevision >= revision) storage.checkpoint(checkpoint); });
 document.addEventListener('visibilitychange',() => { if(document.hidden) flush(); });
 get('canvas').addEventListener('dragover',event => event.preventDefault());
