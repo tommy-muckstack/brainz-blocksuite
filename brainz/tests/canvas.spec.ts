@@ -259,6 +259,10 @@ test('single clicks keep notes draggable and double click enters text editing',a
 test('all drawing controls remain reachable above an open chat dock',async({page})=>{
   await page.setViewportSize({width:1200,height:375});
   await openBoard(page);
+  const tray = page.locator('#tools-content');
+  await expect(page.locator('.tools')).toHaveCSS('height','251px');
+  const sizes = await tray.evaluate(element=>[element.scrollHeight,element.clientHeight]);
+  expect(sizes[0], `tool tray scroll/client: ${sizes}`).toBeLessThanOrEqual(sizes[1]);
   for (const name of ['Select','Sticky note','Box','Capture area']) {
     const button=page.getByRole('button',{name,exact:true});
     await button.scrollIntoViewIfNeeded();
@@ -268,6 +272,32 @@ test('all drawing controls remain reachable above an open chat dock',async({page
     await button.click();
   }
   await page.keyboard.press('Escape');
+});
+
+test('drawing tools fit without scrolling at compact window heights',async({page})=>{
+  for (const height of [600,520,450,375]) {
+    await page.setViewportSize({width:1200,height});
+    if (height===600) await openBoard(page);
+    const tray = page.locator('#tools-content');
+    await expect(page.locator('.tools')).toHaveCSS('height',`${height>590?515:height>460?390:251}px`);
+    const sizes = await tray.evaluate(element=>[element.scrollHeight,element.clientHeight]);
+    expect(sizes[0], `tool tray at ${height}px scroll/client: ${sizes}`).toBeLessThanOrEqual(sizes[1]);
+    const last = await page.locator('#commands').boundingBox();
+    expect(last).not.toBeNull();
+    expect(last!.y+last!.height).toBeLessThanOrEqual(height);
+  }
+});
+
+test('history controls sit beside Add file in the canvas header',async({page})=>{
+  await openBoard(page);
+  const header = page.locator('.header-actions');
+  const undo = await header.locator('#undo').boundingBox();
+  const redo = await header.locator('#redo').boundingBox();
+  const addFile = await header.locator('#add-file').boundingBox();
+  expect(undo && redo && addFile).toBeTruthy();
+  expect(undo!.x+undo!.width).toBeLessThan(redo!.x);
+  expect(redo!.x+redo!.width).toBeLessThan(addFile!.x);
+  expect(undo!.width).toBeLessThan(30);
 });
 
 test('chat context includes explicit arrows, the visual canvas, and images after reopening',async({page})=>{

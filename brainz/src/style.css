@@ -30,6 +30,10 @@ button svg { width:19px; height:19px; flex:none; }
 .save-state.saving { color:#c4b781; }.save-state.saving i { background:#d9bf69; animation:breathe 1s ease-in-out infinite; }.save-state.failed { color:#efaa94; }
 .text-button { display:flex; align-items:center; justify-content:center; gap:7px; padding:8px 10px; border-radius:8px; font-size:12px; line-height:18px; white-space:nowrap; transition:background .13s,color .13s; }
 .text-button:hover { background:#33332b; }.text-button svg { width:16px; height:16px; }.share { background:#e2c76b; color:#24231b; font-weight:550; }.share:hover { background:#efd582; }
+.header-history { display:flex; align-items:center; gap:2px; padding-right:8px; border-right:1px solid #3b3b33; }
+.header-history button { display:grid; place-items:center; width:27px; height:27px; border-radius:7px; color:#aaa99f; }
+.header-history button:hover { background:#37372f; color:#e5e3da; }
+.header-history svg { width:15px; height:15px; }
 #copy-view { min-width:104px; }.share.copied { background:#a1c181; color:#24231b; }
 #canvas { position:absolute; inset:55px 0 0; overflow:hidden; background:#141413; }
 edgeless-editor { display:block; width:100%; height:100%; }
@@ -50,19 +54,27 @@ edgeless-toolbar-widget,affine-edgeless-zoom-toolbar-widget { display:none!impor
 .empty-symbol { display:flex; justify-content:center; align-items:center; width:58px; height:58px; margin:0 auto 22px; background:#25251f; border:1px solid #3a392c; border-radius:18px; transform:rotate(-5deg); color:#d2bd78; }.empty-symbol svg { width:28px; height:28px; }
 h1 { font-weight:500; letter-spacing:-.7px; font-size:27px; margin:0 0 12px; } .empty-state p { margin:0; color:#99988e; font-size:14px; line-height:1.7; }.empty-state>span { display:block; color:#727268; font-size:11px; margin-top:13px; }
 .primary { pointer-events:auto; background:#e2c76b; color:#262318; font-weight:550; display:inline-flex; justify-content:center; align-items:center; gap:7px; border-radius:9px; padding:10px 14px; font-size:12px; transition:background .15s,transform .15s; }.primary:hover { background:#efd680; transform:translateY(-1px); }.empty-state .primary { margin-top:24px; }
-.bottom-left { position:absolute; left:18px; bottom:18px; z-index:8; display:flex; align-items:center; gap:18px; }.history,.zoom-controls { display:flex; align-items:center; border:1px solid #3b3b33; border-radius:11px; background:rgba(34,34,30,.96); box-shadow:0 3px 16px #0002; padding:4px; }
-.history button,.zoom-controls button { display:flex; align-items:center; justify-content:center; height:32px; min-width:32px; padding:0 8px; border-radius:7px; color:#bbb9ac; }.history button:hover,.zoom-controls button:hover { background:#37372f; color:#e5e3da; }.history svg { width:16px; height:16px; }
+.bottom-left { position:absolute; left:18px; bottom:18px; z-index:8; display:flex; align-items:center; gap:18px; }.zoom-controls { display:flex; align-items:center; border:1px solid #3b3b33; border-radius:11px; background:rgba(34,34,30,.96); box-shadow:0 3px 16px #0002; padding:4px; }
+.zoom-controls button { display:flex; align-items:center; justify-content:center; height:32px; min-width:32px; padding:0 8px; border-radius:7px; color:#bbb9ac; }.zoom-controls button:hover { background:#37372f; color:#e5e3da; }
 .hint { font-size:10px; color:#74746a; user-select:none; transition:opacity .12s; }.hint span { margin:0 9px; }
 .zoom-controls { position:absolute; z-index:8; bottom:18px; right:18px; gap:2px; }.zoom-controls>span { width:1px; height:18px; background:#3d3c33; margin:0 4px; }#zoom-reset { min-width:48px; font-size:11px; font-variant-numeric:tabular-nums; }.zoom-controls svg { width:16px; height:16px; }
 #toast { z-index:10000; position:fixed; bottom:74px; left:50%; transform:translateX(-50%); padding:11px 16px; border-radius:10px; border:1px solid #4a483a; background:#303027; color:#e9e4d1; font-size:12px; box-shadow:0 5px 22px #0005; max-width:80%; }
 dialog { color:#e5e3da; background:#24241f; border:1px solid #454438; border-radius:17px; padding:24px; width:400px; max-width:90vw; box-shadow:0 20px 100px #0009; }dialog::backdrop { background:#090a0866; backdrop-filter:blur(4px); }.dialog-title { display:flex; align-items:center; justify-content:space-between; }.dialog-title h2 { font-size:19px; letter-spacing:-.3px; font-weight:550; margin:0; }.dialog-title button { width:28px; height:28px; display:grid; place-items:center; border-radius:6px; }.dialog-title button:hover { background:#3a392f; }dialog p { color:#a19f92; font-size:12px; line-height:1.6; margin:10px 0 22px; }dialog label { display:flex; flex-direction:column; gap:8px; font-size:12px; color:#b6b2a4; margin:16px 0; }dialog input { width:100%; border-radius:9px; border:1px solid #454438; background:#1a1a17; color:#e6e1d2; padding:11px 12px; font-size:13px; }dialog input::placeholder { color:#716e61; }dialog .primary { width:100%; margin-top:12px; }#link-error { color:#eda58d; font-size:12px; }
 @keyframes breathe { 50% { opacity:.3; } }
 @media(max-width:760px) { .hint,.save-state { display:none; }.header-actions { gap:3px; }.topbar { padding:0 12px; gap:8px; }.text-button { padding:7px; }.tools { left:10px; } }
-@media(max-height:660px) {
-  .tools { top:70px; }
-  .tools.expanded { height:calc(100vh - 140px); overflow:hidden; }
-  .tools-content { overflow-y:auto; }
-  .tools .tooltip { display:none; }
+@media(max-height:590px) {
+  .tools { top:62px; }
+  .tools.expanded { width:130px; height:390px; }
+  .tools-content { grid-template-columns:repeat(3,36px); gap:3px; }
+  .tool { width:36px; height:36px; }
+}
+@media(max-height:460px) {
+  .tools { top:54px; padding:4px; gap:2px; }
+  .tools.expanded { width:136px; height:251px; }
+  #tools-toggle { width:34px; height:34px; }
+  .tools-content { grid-template-columns:repeat(4,30px); gap:1px; }
+  .tool { width:30px; height:30px; }
+  .tools .rule { margin:0 4px; }
 }
 .canvas-command-panel { position:absolute; z-index:40; top:76px; left:50%; transform:translateX(-50%); width:min(490px,calc(100vw - 32px)); border:1px solid #4a483a; border-radius:14px; background:#262620; box-shadow:0 16px 70px #0009; overflow:hidden; }
 .canvas-command-panel>input { width:100%; border:0; border-bottom:1px solid #3b3b33; padding:17px 18px; background:transparent; color:#e5e3da; font-size:15px; outline:none; }
