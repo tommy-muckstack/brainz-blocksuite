@@ -1,7 +1,7 @@
 import { effects as presetEffects } from '@blocksuite/presets/effects';
 import { effects as blockEffects } from '@blocksuite/blocks/effects';
 import { EdgelessEditor } from '@blocksuite/presets';
-import { AffineSchemas, DefaultTool, NoteTool, EdgelessRootService, EditPropsStore, ShapeType, ShapeStyle, ConnectorMode, ThemeProvider } from '@blocksuite/blocks';
+import { AffineSchemas, DefaultTool, NoteTool, EdgelessRootService, EdgelessSnapManager, EditPropsStore, ShapeType, ShapeStyle, ConnectorMode, ThemeProvider } from '@blocksuite/blocks';
 import { DocCollection, Schema, Text } from '@blocksuite/store';
 import { Bound, getCommonBound, Point } from '@blocksuite/global/utils';
 import { ToolController } from '@blocksuite/block-std/gfx';
@@ -16,7 +16,7 @@ import './style.css';
 import { installCapture, installSelectionCapture, renderCapture } from './capture';
 import { CanvasNoteTool, CanvasSelectTool, createNote } from './interactions';
 import { describeScene } from './scene';
-import { CanvasConnectionOverlay, CanvasEditPropsStore } from './canvas-overrides';
+import { CanvasConnectionOverlay, CanvasEditPropsStore, CanvasSnapManager } from './canvas-overrides';
 import { CanvasAgent, type PreparedImage } from './canvas-agent';
 import { CanvasStorage, documentUpdate, hydrateImages } from './storage';
 import { icon, mountShell } from './shell';
@@ -276,7 +276,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   editor = new EdgelessEditor(); editor.doc = doc;
   const overrides = new Map<ExtensionType, ExtensionType>([
     [DefaultTool, CanvasSelectTool], [NoteTool, CanvasNoteTool],
-    [EditPropsStore, CanvasEditPropsStore], [ConnectionOverlay, CanvasConnectionOverlay],
+    [EditPropsStore, CanvasEditPropsStore], [ConnectionOverlay, CanvasConnectionOverlay], [EdgelessSnapManager, CanvasSnapManager],
   ]);
   editor.specs = editor.specs.map(extension => overrides.get(extension) ?? extension);
   editor.specs.push(FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal','italic'].flatMap(style => ['300','400','500','600','700'].map(weight => ({font,style,weight,url:`fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf`}))))));
@@ -419,7 +419,7 @@ async function receive(message: Record<string,unknown>) {
       break;
     }
     case 'focus': if (!loading) focusTarget(message.target as BoardTarget); break;
-    case 'relocated': target = message.target as BoardTarget; save(); notice('Canvas moved'); break;
+    case 'relocated': target = message.target as BoardTarget; save(); notice(message.reason === 'renamed' ? 'Canvas renamed' : 'Canvas moved'); break;
     case 'attach': if (loading) attachAfterLoad = true; else void attachToChat(); break;
     case 'saved':
       if (Number(message.revision) >= savedRevision && typeof message.baseHash === 'string') baseHash = message.baseHash;
@@ -501,7 +501,10 @@ get('link-form').onsubmit = event => {
   const label=get<HTMLInputElement>('link-title').value.trim() || decodeURIComponent(url.pathname.split('/').pop() || url.hostname || 'Linked item');
   addLink({title:label,url:url.toString()}); dialog.close(); get<HTMLFormElement>('link-form').reset(); get('link-error').textContent='';
 };
-title.oninput = () => { fitTitle(); changed(); post({type:'titleChanged',title:title.value}); }; title.onblur = flush; saveState.onclick = save;
+let titleDirty = false;
+title.oninput = () => { titleDirty = true; fitTitle(); changed(); post({type:'titleChanged',title:title.value}); };
+title.onblur = () => { flush(); if (titleDirty) { titleDirty = false; post({type:'titleCommitted',title:title.value}); } };
+saveState.onclick = save;
 window.addEventListener('pointerup',() => { if(saveTimer) save(); });
 window.addEventListener('keyup',() => { if(saveTimer) save(); });
 window.addEventListener('pagehide',() => { flush(); if (!loading && savedRevision >= revision) storage.checkpoint(checkpoint); });

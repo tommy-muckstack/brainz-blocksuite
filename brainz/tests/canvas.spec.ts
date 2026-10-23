@@ -15,6 +15,7 @@ async function openBoard(page: Page) {
   });
   await page.goto('/');
   await page.waitForFunction(()=>Boolean(window.__brainzBoard));
+  await page.locator('#tools-toggle').click();
 }
 async function drawBox(page:Page,from:[number,number],to:[number,number]) {
   await page.getByRole('button',{name:'Box',exact:true}).click();
@@ -260,6 +261,7 @@ test('all drawing controls remain reachable above an open chat dock',async({page
   await openBoard(page);
   for (const name of ['Select','Sticky note','Box','Capture area']) {
     const button=page.getByRole('button',{name,exact:true});
+    await button.scrollIntoViewIfNeeded();
     const bounds=(await button.boundingBox())!;
     expect(bounds.y).toBeGreaterThanOrEqual(55);
     expect(bounds.y+bounds.height).toBeLessThan(305);

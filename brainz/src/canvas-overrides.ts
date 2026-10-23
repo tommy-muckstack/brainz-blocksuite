@@ -4,6 +4,72 @@ import { StdIdentifier } from '@blocksuite/block-std';
 import { GfxBlockElementModel, GfxPrimitiveElementModel } from '@blocksuite/block-std/gfx';
 import { createIdentifierFromConstructor, type Container } from '@blocksuite/global/di';
 import { Bound, getPointFromBoundsWithRotation, type IVec } from '@blocksuite/global/utils';
+import { EdgelessSnapManager } from '@blocksuite/blocks';
+import type { GfxController } from '@blocksuite/block-std/gfx';
+
+export class CanvasSnapManager extends EdgelessSnapManager {
+  static override overlayName = 'snap-manager';
+  private holdX?: {position:number;until:number};
+  private holdY?: {position:number;until:number};
+  private feedback:HTMLDivElement;
+  private wasSnapped=false;
+
+  constructor(gfx:GfxController) {
+    super(gfx);
+    this.feedback=document.createElement('div');
+    this.feedback.className='canvas-snap-feedback';
+    this.feedback.setAttribute('aria-hidden','true');
+    document.getElementById('canvas')?.append(this.feedback);
+    const cleanup=this.cleanupAlignables;
+    this.cleanupAlignables=()=>{
+      this.holdX=undefined;this.holdY=undefined;this.wasSnapped=false;
+      this.feedback.classList.remove('active','pulse');
+      cleanup();
+    };
+  }
+
+  override setupAlignables(...args:Parameters<EdgelessSnapManager['setupAlignables']>) {
+    this.holdX=undefined;this.holdY=undefined;this.wasSnapped=false;
+    this.feedback.classList.remove('active','pulse');
+    return super.setupAlignables(...args);
+  }
+
+  override align(bound:Bound) {
+    const correction=super.align(bound);
+    if(globalThis.__brainzSuppressSnap) {
+      this.holdX=undefined;this.holdY=undefined;this.wasSnapped=false;
+      this.feedback.classList.remove('active','pulse');
+      return {dx:0,dy:0};
+    }
+    const now=performance.now();
+    const releaseDistance=16/this.gfx.viewport.zoom;
+    const settle=(raw:number,position:number,held:{position:number;until:number}|undefined):[number,{position:number;until:number}|undefined]=>{
+      if(held && now<held.until && Math.abs(position-held.position)<releaseDistance)
+        return [held.position-position,held];
+      if(raw!==0) {
+        const next={position:position+raw,until:now+160};
+        return [raw,next];
+      }
+      return [0,undefined];
+    };
+    [correction.dx,this.holdX]=settle(correction.dx,bound.x,this.holdX);
+    [correction.dy,this.holdY]=settle(correction.dy,bound.y,this.holdY);
+    const snapped=Boolean(this.holdX || this.holdY);
+    if(snapped) {
+      const [x,y]=this.gfx.viewport.toViewCoord(bound.x+correction.dx,bound.y+correction.dy);
+      const zoom=this.gfx.viewport.zoom;
+      Object.assign(this.feedback.style,{left:`${x}px`,top:`${y}px`,width:`${bound.w*zoom}px`,height:`${bound.h*zoom}px`});
+      this.feedback.classList.add('active');
+      if(!this.wasSnapped) {
+        this.feedback.classList.remove('pulse');
+        void this.feedback.offsetWidth;
+        this.feedback.classList.add('pulse');
+      }
+    } else this.feedback.classList.remove('active','pulse');
+    this.wasSnapped=snapped;
+    return correction;
+  }
+}
 
 export class CanvasEditPropsStore extends EditPropsStore {
   static override setup(container: Container) {

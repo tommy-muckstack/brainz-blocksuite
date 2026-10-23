@@ -26,14 +26,39 @@ export class CanvasTools {
   private points:{x:number;y:number;at:number}[]=[];
   private laserFrame=0;
   private previousTool='pointer';
+  private expanded=false;
+  private pinned=false;
+  private ignoreHover=false;
   readonly commands:CanvasCommands;
   private controller:ToolController;
 
   constructor(private editor:EdgelessEditor, private service:EdgelessRootService, private save:()=>void, extra:()=>CanvasCommand[]) {
     this.controller=editor.std.get(ToolController);
-    const rail=document.querySelector('.tools')!;
+    const rail=document.querySelector<HTMLElement>('.tools')!;
+    const toggle=document.getElementById('tools-toggle')!;
+    const content=document.getElementById('tools-content')!;
+    const setExpanded=(expanded:boolean)=>{
+      this.expanded=expanded;rail.classList.toggle('expanded',expanded);
+      toggle.setAttribute('aria-expanded',String(expanded));
+      toggle.setAttribute('aria-label',expanded?'Collapse drawing tools':'Expand drawing tools');
+      content.inert=!expanded;
+    };
+    rail.addEventListener('pointerenter',()=>{if(!this.ignoreHover)setExpanded(true);});
+    rail.addEventListener('pointerleave',()=>{this.ignoreHover=false;if(!this.pinned)setExpanded(false);});
+    rail.addEventListener('focusin',()=>setExpanded(true));
+    rail.addEventListener('focusout',event=>{if(!rail.contains(event.relatedTarget as Node) && !this.pinned && !rail.matches(':hover'))setExpanded(false);});
+    toggle.onclick=()=>{this.pinned=!this.pinned;this.ignoreHover=!this.pinned;setExpanded(this.pinned);};
+    rail.addEventListener('keydown',event=>{if(event.key==='Escape'){this.pinned=false;this.ignoreHover=true;setExpanded(false);toggle.focus();}});
     rail.querySelector('[data-tool="box"]')!.insertAdjacentHTML('afterend',`${tool('ellipse','Ellipse','O')}${tool('diamond','Diamond','D')}`);
-    rail.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>button.onclick=()=>this.select(button.dataset.tool!));
+    rail.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>{
+      button.onclick=()=>this.select(button.dataset.tool!);
+      const positionTooltip=()=>{
+        const tooltip=button.querySelector<HTMLElement>('.tooltip');
+        if(tooltip) tooltip.style.left=`${rail.getBoundingClientRect().right-button.getBoundingClientRect().left+10}px`;
+      };
+      button.addEventListener('pointerenter',positionTooltip);
+      button.addEventListener('focus',positionTooltip);
+    });
     const lock=document.getElementById('lock-tool')!;lock.onclick=()=>this.toggleLock();
     this.commands=new CanvasCommands(()=>[
       ...definitions.map(([id,label,shortcut])=>({id:`tool-${id}`,label,group:'Tools' as const,keys:shortcut,run:()=>this.select(id)})),
@@ -161,6 +186,8 @@ export class CanvasTools {
   }
 
   private render() {
+    document.getElementById('tools-toggle')!.querySelector('svg')?.remove();
+    document.getElementById('tools-toggle')!.insertAdjacentHTML('afterbegin',icon(this.active));
     document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.tool===this.active || (this.active==='triangle' && button.dataset.tool==='box'))));
     document.getElementById('lock-tool')!.setAttribute('aria-pressed',String(this.locked));
     const selected=this.service.selection.selectedElements;

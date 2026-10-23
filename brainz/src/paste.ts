@@ -43,6 +43,10 @@ export function installPaste(editor: EdgelessEditor, service: EdgelessRootServic
       })();
       return;
     }
+    // BlockSuite puts selected canvas objects in an HTML snapshot. Let its
+    // clipboard controller deserialize that snapshot instead of treating the
+    // missing plain text as an image-only WebView paste.
+    if(event.clipboardData?.getData('text/html').includes('data-blocksuite-snapshot')) return;
     if(isTextInput(event))return;
     const value=event.clipboardData?.getData('text/plain').trim();
     if(value && supportedLink(value)) {event.preventDefault();event.stopImmediatePropagation();const url=new URL(value);addLink({title:decodeURIComponent(url.pathname.split('/').pop() || url.hostname),url:value},cursor);}

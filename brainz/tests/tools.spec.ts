@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-async function open(page:Page) {
+async function open(page:Page,expandTools=true) {
   await page.addInitScript(()=>{
     (window as any).__messages=[];
     window.ipc={postMessage(value:string){
@@ -12,7 +12,58 @@ async function open(page:Page) {
     }};
   });
   await page.goto('/');await page.waitForFunction(()=>Boolean((window.__brainzBoard as any)?.canvasTools));
+  if(expandTools) await page.locator('#tools-toggle').click();
 }
+
+test('Drawing tools expand on hover and shortcut labels appear only for the hovered tool',async({page})=>{
+  await open(page,false);
+  const tray=page.locator('.tools');
+  await expect(tray).not.toHaveClass(/expanded/);
+  await expect(page.locator('#tools-toggle')).toHaveAttribute('aria-expanded','false');
+  await page.locator('#tools-toggle').hover();
+  await expect(tray).toHaveClass(/expanded/);
+  await page.getByRole('button',{name:'Pan',exact:true}).hover();
+  await expect(page.getByRole('button',{name:'Pan',exact:true}).locator('.tooltip')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Pan',exact:true}).locator('.tooltip kbd')).toHaveText('H');
+  await expect(page.getByRole('button',{name:'Select',exact:true}).locator('.tooltip')).toBeHidden();
+  await expect.poll(()=>page.locator('.tools').evaluate(element=>Math.round(element.getBoundingClientRect().height))).toBe(515);
+  await page.screenshot({path:test.info().outputPath('drawing-tools-expanded.png')});
+  await page.mouse.move(500,400);
+  await expect(tray).not.toHaveClass(/expanded/);
+});
+
+test('Command C and Command V duplicate a selected canvas shape',async({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  await open(page);
+  await page.getByRole('button',{name:'Box',exact:true}).click();
+  await page.mouse.move(350,250);await page.mouse.down();await page.mouse.move(510,360,{steps:10});await page.mouse.up();
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').length)).toBe(1);
+  await page.mouse.click(420,300);
+  await page.keyboard.press('Meta+c');
+  await expect.poll(()=>page.evaluate(async()=>{
+    const items=await navigator.clipboard.read();
+    return items[0]?.types.includes('text/html') && (await (await items[0].getType('text/html')).text()).includes('data-blocksuite-snapshot');
+  })).toBe(true);
+  await page.keyboard.press('Meta+v');
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').length)).toBe(2);
+});
+
+test('Dragging a box to its neighbor shows a snap cue and still allows pulling through',async({page})=>{
+  await open(page);
+  for(const [left,right] of [[300,430],[630,760]]) {
+    await page.getByRole('button',{name:'Box',exact:true}).click();
+    await page.mouse.move(left,250);await page.mouse.down();await page.mouse.move(right,350,{steps:10});await page.mouse.up();
+  }
+  await page.mouse.move(695,300);await page.mouse.down();
+  await page.mouse.move(498,300,{steps:16});
+  await expect(page.locator('.canvas-snap-feedback')).toHaveClass(/active/);
+  await page.screenshot({path:test.info().outputPath('aligned-boxes.png')});
+  const aligned=await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').map((element:any)=>JSON.parse(element.xywh)).sort((a:any,b:any)=>a[0]-b[0]));
+  expect(aligned[1][0]).toBeCloseTo(aligned[0][0]+aligned[0][2],0);
+  await page.mouse.move(455,300,{steps:8});
+  await expect(page.locator('.canvas-snap-feedback')).not.toHaveClass(/active/);
+  await page.mouse.up();
+});
 
 test('Tool shortcuts select every drawing mode; laser trails never change the document',async({page})=>{
   await open(page);
