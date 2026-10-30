@@ -8,6 +8,8 @@ async function open(page:Page,expandTools=true) {
       const send=(detail:unknown)=>queueMicrotask(()=>window.dispatchEvent(new CustomEvent('brainz',{detail})));
       if(message.type==='ready')send({type:'load',document:JSON.parse(localStorage.getItem('tools-board') ?? 'null'),target:{path:'/brain/Tools.brainzboard'},agentEnabled:true});
       if(message.type==='save'){localStorage.setItem('tools-board',JSON.stringify(message.document));send({type:'saved',revision:message.revision});}
+      if(message.type==='copyObjects'){localStorage.setItem('tools-clipboard',message.html);send({type:'objectsCopied',requestId:message.requestId});}
+      if(message.type==='pasteClipboard'){const html=localStorage.getItem('tools-clipboard');if(html)send({type:'pasteObjects',html});}
       if(message.type==='recognizeImage')send({type:'imageText',objectId:message.objectId,sourceId:message.sourceId,text:'Text from the screenshot'});
     }};
   });
@@ -32,20 +34,93 @@ test('Drawing tools expand on hover and shortcut labels appear only for the hove
   await expect(tray).not.toHaveClass(/expanded/);
 });
 
-test('Command C and Command V duplicate a selected canvas shape',async({page,context})=>{
-  await context.grantPermissions(['clipboard-read','clipboard-write']);
+test('Command C and Command V duplicate a selected canvas shape through the native clipboard',async({page})=>{
   await open(page);
   await page.getByRole('button',{name:'Box',exact:true}).click();
   await page.mouse.move(350,250);await page.mouse.down();await page.mouse.move(510,360,{steps:10});await page.mouse.up();
-  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').length)).toBe(1);
   await page.mouse.click(420,300);
   await page.keyboard.press('Meta+c');
-  await expect.poll(()=>page.evaluate(async()=>{
-    const items=await navigator.clipboard.read();
-    return items[0]?.types.includes('text/html') && (await (await items[0].getType('text/html')).text()).includes('data-blocksuite-snapshot');
-  })).toBe(true);
   await page.keyboard.press('Meta+v');
+  const shapes=()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').map((element:any)=>({id:element.id,fill:element.fillColor,shape:element.shapeType})));
+  await expect.poll(async()=>(await shapes()).length).toBe(2);
+  const [original,copy]=await shapes();
+  expect(copy.id).not.toBe(original.id);expect(copy.fill).toEqual(original.fill);expect(copy.shape).toBe(original.shape);
+  await page.locator('#undo').click();await expect.poll(async()=>(await shapes()).length).toBe(1);
+  await page.locator('#redo').click();await expect.poll(async()=>(await shapes()).length).toBe(2);
+});
+
+test('Typing in a text object keeps every character in that object',async({page})=>{
+  await open(page);
+  await page.getByRole('button',{name:'Text',exact:true}).click();
+  await page.mouse.click(350,250);
+  await page.keyboard.type('new text frames shapes connectors?');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('next line');
+  await expect.poll(()=>page.evaluate(()=>{
+    const elements=(window.__brainzBoard as any).service.edgelessElements;
+    return elements.map((element:any)=>({kind:element.type ?? element.flavour,text:element.text?.toString() ?? element.children?.map((child:any)=>child.text?.toString() ?? '').join('\n')}));
+  })).toEqual([{kind:'affine:edgeless-text',text:'new text frames shapes connectors?\nnext line'}]);
+  await expect(page.getByRole('dialog',{name:'Canvas shortcuts'})).toBeHidden();
+  await page.keyboard.press('Escape');
+  const text=page.locator('affine-edgeless-text');
+  await text.dblclick();
+  await page.keyboard.press('Meta+ArrowRight');
+  await page.keyboard.type(' more shapes');
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.length)).toBe(1);
+  await expect.poll(()=>text.innerText()).toContain('more shapes');
+});
+
+test('Native copy keeps connected objects intact when pasted into another document',async({page})=>{
+  await open(page);
+  await page.keyboard.press('r');await page.mouse.move(300,240);await page.mouse.down();await page.mouse.move(490,360,{steps:8});await page.mouse.up();await page.keyboard.type('Start');await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Add connected object right',exact:true}).click();await page.keyboard.type('Next');await page.keyboard.press('Escape');
+  await page.keyboard.press('Meta+a');await page.keyboard.press('Meta+c');
+  await expect.poll(()=>page.evaluate(()=>localStorage.getItem('tools-clipboard'))).toContain('data-blocksuite-snapshot');
+  const originalIds=await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.map((element:any)=>element.id));
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  await page.evaluate(()=>localStorage.removeItem('tools-board'));await page.reload();
+  await page.waitForFunction(()=>Boolean((window.__brainzBoard as any)?.canvasTools));
+  await page.keyboard.press('Meta+v');
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.length)).toBe(3);
+  const pasted=await page.evaluate(()=>{
+    const elements=(window.__brainzBoard as any).service.edgelessElements;
+    return {shapes:elements.filter((element:any)=>element.type==='shape').map((element:any)=>({id:element.id,text:element.text?.toString()})),connector:elements.filter((element:any)=>element.type==='connector').map((element:any)=>({source:element.source.id,target:element.target.id}))[0]};
+  });
+  expect(pasted.shapes.map((shape:any)=>shape.text).sort()).toEqual(['Next','Start']);
+  const ids=pasted.shapes.map((shape:any)=>shape.id);
+  expect(ids.every((id:string)=>!originalIds.includes(id))).toBe(true);
+  expect(ids).toContain(pasted.connector.source);expect(ids).toContain(pasted.connector.target);
+});
+
+test('Paste waits for a pending native copy and repeated paste creates separate objects',async({page})=>{
+  await open(page);
+  await page.keyboard.press('r');await page.mouse.move(350,250);await page.mouse.down();await page.mouse.move(510,360,{steps:8});await page.mouse.up();
+  await page.evaluate(()=>{
+    const ipc=window.ipc!;
+    window.ipc={postMessage(value:string){if(JSON.parse(value).type==='copyObjects')setTimeout(()=>ipc.postMessage(value),200);else ipc.postMessage(value);}};
+  });
+  await page.keyboard.press('Meta+c');await page.keyboard.press('Meta+v');await page.keyboard.press('Meta+v');
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.length)).toBe(3);
+});
+
+test('The collapsed quick action remembers the last drawing tool after placement and Escape',async({page})=>{
+  await open(page,false);
+  await page.locator('#tools-toggle').hover();
+  await page.getByRole('button',{name:'Box',exact:true}).click();
+  await page.mouse.move(350,250);await page.mouse.down();await page.mouse.move(510,360,{steps:10});await page.mouse.up();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.tools')).not.toHaveClass(/expanded/);
+  const quick=page.getByRole('button',{name:'Use Box',exact:true});
+  await quick.click();
+  await expect(page.locator('.tools')).not.toHaveClass(/expanded/);
+  await page.mouse.move(650,250);await page.mouse.down();await page.mouse.move(810,360,{steps:10});await page.mouse.up();
   await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').length)).toBe(2);
+  await page.locator('#tools-toggle').hover();
+  await page.getByRole('button',{name:'Ellipse',exact:true}).click();
+  await page.mouse.move(650,500);await page.mouse.down();await page.mouse.move(810,610,{steps:10});await page.mouse.up();
+  await expect(page.getByRole('button',{name:'Use Ellipse',exact:true})).toBeVisible();
+  await expect.poll(()=>page.locator('.tools').evaluate(element=>Math.round(element.getBoundingClientRect().height))).toBe(56);
+  await page.screenshot({path:test.info().outputPath('remembered-tool.png')});
 });
 
 test('Dragging a box to its neighbor shows a snap cue and still allows pulling through',async({page})=>{
@@ -194,6 +269,8 @@ test('Selection actions use one toolbar and links stay nonmodal; shortcuts and c
   await page.keyboard.press('?');await expect(page.getByRole('dialog',{name:'Canvas shortcuts'})).toBeVisible();await page.keyboard.press('Escape');
   await page.mouse.click(700,550,{button:'right'});await expect(page.locator('.canvas-command-panel')).toHaveAttribute('data-mode','context');
   await page.getByRole('combobox',{name:'Find a canvas command'}).fill('laser');await page.keyboard.press('Enter');await expect(page.locator('#canvas-laser')).toBeVisible();
+  await page.keyboard.press('Meta+k');await expect(page.locator('.canvas-command-panel')).toBeVisible();
+  await page.keyboard.press('Meta+k');await expect(page.locator('.canvas-command-panel')).toBeHidden();
 });
 
 test('Quick-created shapes copy their style, keep original labels, and undo the new shape and connector together',async({page})=>{

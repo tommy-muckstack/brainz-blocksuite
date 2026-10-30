@@ -1,4 +1,4 @@
-import { DefaultTool, NoteTool, addNoteAtPoint, focusTextModel } from '@blocksuite/blocks';
+import { DefaultTool, NoteTool, TextTool, addNoteAtPoint, focusTextModel } from '@blocksuite/blocks';
 import type { BlockStdScope, PointerEventState } from '@blocksuite/block-std';
 import { GfxControllerIdentifier } from '@blocksuite/block-std/gfx';
 import { MindmapElementModel, NoteBlockModel, ShapeElementModel } from '@blocksuite/affine-model';
@@ -17,7 +17,7 @@ window.addEventListener('keydown',event=>{
   event.preventDefault();event.stopImmediatePropagation();pendingTyping.insert(event.key);pendingTyping.typed=true;
 },true);
 
-function focusNewNote(std:BlockStdScope, id:string, paragraph:string) {
+function focusTextBlock(std:BlockStdScope, id:string, paragraph:string) {
   const gfx=std.get(GfxControllerIdentifier);
   const block=std.doc.getBlockById(paragraph);
   const pending={typed:false,insert:(character:string)=>{
@@ -47,7 +47,7 @@ export function createNote(std: BlockStdScope, point: Point, width = 280, height
   }
   gfx.tool.setTool('default');
   gfx.selection.set({ elements: [id], editing: false });
-  if (edit && !lockedTools.has(std)) focusNewNote(std,id,paragraph);
+  if (edit && !lockedTools.has(std)) focusTextBlock(std,id,paragraph);
   return id;
 }
 
@@ -65,6 +65,15 @@ export function editShape(editor: EdgelessEditor, shape: ShapeElementModel, init
   // floating editor so beforeinput reaches its own rich-text model.
   input.contentEditable='false';
   input.element=shape; input.edgeless=root; input.mountEditor=(next)=>{editShape(editor,next);};
+  input.addEventListener('keydown',event=>{
+    if(event.key!=='Escape' || event.isComposing)return;
+    // Finish synchronously: the engine's deferred Escape selection can otherwise
+    // overwrite a subsequent Select All before Copy serializes the objects.
+    event.preventDefault();event.stopImmediatePropagation();pendingTyping=undefined;
+    if(document.activeElement instanceof HTMLElement)document.activeElement.blur();
+    root.gfx.selection.set({elements:[shape.id],editing:false});
+    editor.std.host.tabIndex=-1;editor.std.host.focus({preventScroll:true});
+  },true);
   root.mountElm.append(input); root.gfx.tool.setTool('default'); root.gfx.selection.set({elements:[shape.id],editing:true});
   const pending={typed:false,insert:(character:string)=>editor.doc.spaceDoc.transact(()=>{
     if (!pending.typed && shape.group instanceof MindmapElementModel) shape.text!.delete(0,shape.text!.length);
@@ -80,7 +89,21 @@ export function editShape(editor: EdgelessEditor, shape: ShapeElementModel, init
 export function editNote(std: BlockStdScope, note: NoteBlockModel) {
   if(note.isLocked())return;
   const paragraph=note.children.find(child=>'text' in child)?.id ?? std.doc.addBlock('affine:paragraph',{type:'text'},note.id);
-  focusNewNote(std,note.id,paragraph);
+  focusTextBlock(std,note.id,paragraph);
+}
+
+export class CanvasTextTool extends TextTool {
+  override click(event: PointerEventState) {
+    const [x,y]=this.gfx.viewport.toModelCoord(event.x,event.y);
+    this.doc.captureSync();
+    this.gfx.tool.setTool('default');
+    const result=this.std.command.exec('insertEdgelessText',{x,y});
+    const block=result.textId?this.doc.getBlockById(result.textId):undefined;
+    const paragraph=block?.children[0];
+    // Selection and typing must belong to the new object before its asynchronous
+    // rich-text mount, otherwise the first letters become drawing shortcuts.
+    if(block && paragraph)focusTextBlock(this.std,block.id,paragraph.id);
+  }
 }
 
 export class CanvasNoteTool extends NoteTool {

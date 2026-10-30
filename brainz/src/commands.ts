@@ -64,7 +64,14 @@ export class CanvasCommands {
     this.panel.hidden=false; this.input.value=''; this.active=0; this.input.setAttribute('aria-expanded','true'); this.render(); this.input.focus();
   }
 
-  close() {this.panel.hidden=true;this.input.setAttribute('aria-expanded','false');this.previousFocus?.focus();}
+  close() {
+    const focused=document.activeElement;
+    // WebKit can keep a hidden input as the keyboard target after a command.
+    if(focused instanceof HTMLElement && this.panel.contains(focused))focused.blur();
+    this.panel.hidden=true;this.input.setAttribute('aria-expanded','false');
+    if(this.previousFocus?.isConnected && this.previousFocus.getClientRects().length)this.previousFocus.focus({preventScroll:true});
+    this.previousFocus=undefined;
+  }
 
   private run(command?: CanvasCommand) {
     if (!command) return;

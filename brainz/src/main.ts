@@ -1,7 +1,7 @@
 import { effects as presetEffects } from '@blocksuite/presets/effects';
 import { effects as blockEffects } from '@blocksuite/blocks/effects';
 import { EdgelessEditor } from '@blocksuite/presets';
-import { AffineSchemas, DefaultTool, NoteTool, EdgelessRootService, EdgelessSnapManager, EditPropsStore, ShapeType, ShapeStyle, ConnectorMode, ThemeProvider } from '@blocksuite/blocks';
+import { AffineSchemas, DefaultTool, NoteTool, TextTool, EdgelessRootService, EdgelessSnapManager, EditPropsStore, ShapeType, ShapeStyle, ConnectorMode, ThemeProvider } from '@blocksuite/blocks';
 import { DocCollection, Schema, Text } from '@blocksuite/store';
 import { Bound, getCommonBound, Point } from '@blocksuite/global/utils';
 import { ToolController } from '@blocksuite/block-std/gfx';
@@ -14,7 +14,7 @@ import * as Y from 'yjs';
 import { base64ToBytes, boardLink, bytesToBase64, supportedLink, type BoardDocument, type BoardTarget, type ImageAsset, type LinkReference } from './model';
 import './style.css';
 import { installCapture, installSelectionCapture, renderCapture } from './capture';
-import { CanvasNoteTool, CanvasSelectTool, createNote } from './interactions';
+import { CanvasNoteTool, CanvasSelectTool, CanvasTextTool, createNote } from './interactions';
 import { describeScene } from './scene';
 import { CanvasConnectionOverlay, CanvasEditPropsStore, CanvasSnapManager } from './canvas-overrides';
 import { CanvasAgent, type PreparedImage } from './canvas-agent';
@@ -275,7 +275,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
   }
   editor = new EdgelessEditor(); editor.doc = doc;
   const overrides = new Map<ExtensionType, ExtensionType>([
-    [DefaultTool, CanvasSelectTool], [NoteTool, CanvasNoteTool],
+    [DefaultTool, CanvasSelectTool], [NoteTool, CanvasNoteTool], [TextTool, CanvasTextTool],
     [EditPropsStore, CanvasEditPropsStore], [ConnectionOverlay, CanvasConnectionOverlay], [EdgelessSnapManager, CanvasSnapManager],
   ]);
   editor.specs = editor.specs.map(extension => overrides.get(extension) ?? extension);
@@ -441,6 +441,19 @@ async function receive(message: Record<string,unknown>) {
         const metadata=editor.doc.spaceDoc.getMap<Record<string,unknown>>('brainz:meta');
         metadata.set(object.id,{...metadata.get(object.id),ocr:message.text.slice(0,100000)});
       }
+      break;
+    }
+    case 'pasteObjects': {
+      editor.std.host.tabIndex=-1;editor.std.host.focus({preventScroll:true});
+      const data=new DataTransfer();data.setData('text/html',String(message.html));
+      editor.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+      break;
+    }
+    case 'pasteText': {
+      editor.std.host.tabIndex=-1;editor.std.host.focus({preventScroll:true});
+      const data=new DataTransfer();data.setData('text/plain',String(message.text));
+      data.setData('application/x-brainz-native-text','true');
+      editor.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
       break;
     }
     case 'pasteImage': {

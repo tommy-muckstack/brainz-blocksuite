@@ -19,6 +19,12 @@ The native app bundles `dist/`; users need neither Node nor a hosted service.
 file picking and opening links. The development preview uses localStorage.
 No canvas content is sent to a server.
 
+Canvas object copy/cut uses `copyObjects` with the engine's HTML snapshot;
+the host acknowledges `objectsCopied` after storing it as system-clipboard
+metadata. `pasteClipboard` returns `pasteObjects`, `pasteText`, or `pasteImage`.
+This avoids WebKit's missing paste events on a non-editable canvas and retains
+the engine's ID remapping for grouped objects and connector attachments.
+
 Boards use a versioned JSON envelope around a Yjs document. Object IDs, text,
 connector attachments and linked-file metadata survive reopening. The default
 board starts in `Canvases/Untitled.brainzboard` in new workspaces; legacy boards
@@ -35,7 +41,8 @@ adapts the pinned engine's connection overlay and transparent-color style cache.
 
 The rail supports single-key tools, repeat locking with Q, and a searchable
 command menu (Command-K). Right-click uses the same command registry; ? shows
-shortcuts. Sticky notes continue with Tab or Shift-Tab and finish with
+shortcuts. The collapsed rail reactivates the last drawing tool with one click;
+its separate chevron opens the full palette. Sticky notes continue with Tab or Shift-Tab and finish with
 Command-Enter. Text sizing defaults to Auto and can be changed in the selection
 toolbar. Quick-create dots and the drop picker create attached, editable objects.
 

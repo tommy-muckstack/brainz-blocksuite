@@ -26,6 +26,7 @@ export class CanvasTools {
   private points:{x:number;y:number;at:number}[]=[];
   private laserFrame=0;
   private previousTool='pointer';
+  private lastTool='pointer';
   private expanded=false;
   private pinned=false;
   private ignoreHover=false;
@@ -36,6 +37,7 @@ export class CanvasTools {
     this.controller=editor.std.get(ToolController);
     const rail=document.querySelector<HTMLElement>('.tools')!;
     const toggle=document.getElementById('tools-toggle')!;
+    const quick=document.getElementById('tools-quick')!;
     const content=document.getElementById('tools-content')!;
     const setExpanded=(expanded:boolean)=>{
       this.expanded=expanded;rail.classList.toggle('expanded',expanded);
@@ -43,12 +45,13 @@ export class CanvasTools {
       toggle.setAttribute('aria-label',expanded?'Collapse drawing tools':'Expand drawing tools');
       content.inert=!expanded;
     };
-    rail.addEventListener('pointerenter',()=>{if(!this.ignoreHover)setExpanded(true);});
+    toggle.addEventListener('pointerenter',()=>{if(!this.ignoreHover)setExpanded(true);});
     rail.addEventListener('pointerleave',()=>{this.ignoreHover=false;if(!this.pinned)setExpanded(false);});
-    rail.addEventListener('focusin',()=>setExpanded(true));
+    rail.addEventListener('focusin',event=>{if(event.target!==quick)setExpanded(true);});
     rail.addEventListener('focusout',event=>{if(!rail.contains(event.relatedTarget as Node) && !this.pinned && !rail.matches(':hover'))setExpanded(false);});
     toggle.onclick=()=>{this.pinned=!this.pinned;this.ignoreHover=!this.pinned;setExpanded(this.pinned);};
-    rail.addEventListener('keydown',event=>{if(event.key==='Escape'){this.pinned=false;this.ignoreHover=true;setExpanded(false);toggle.focus();}});
+    quick.onclick=()=>this.select(this.lastTool);
+    rail.addEventListener('keydown',event=>{if(event.key==='Escape'){this.pinned=false;this.ignoreHover=true;quick.focus();setExpanded(false);}});
     rail.querySelector('[data-tool="box"]')!.insertAdjacentHTML('afterend',`${tool('ellipse','Ellipse','O')}${tool('diamond','Diamond','D')}`);
     rail.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>{
       button.onclick=()=>this.select(button.dataset.tool!);
@@ -90,6 +93,7 @@ export class CanvasTools {
   }
 
   select(name:string) {
+    if(name!=='pointer' && name!=='hand')this.lastTool=name;
     if(name==='triangle' || name==='ellipse' || name==='diamond' || name==='box') this.previousTool=name;
     this.active=name;this.selecting=true;this.laser.hidden=name!=='laser';
     if(name!=='laser') {this.points=[];cancelAnimationFrame(this.laserFrame);}
@@ -130,10 +134,12 @@ export class CanvasTools {
   }
 
   private keydown(event:KeyboardEvent) {
+    if(event.defaultPrevented || event.isComposing)return;
     const key=event.key.toLowerCase(), modified=event.metaKey || event.ctrlKey;
     if(modified && (key==='k' || key==='/')) {event.preventDefault();event.stopImmediatePropagation();this.commands.open?this.commands.close():this.commands.show();return;}
     if(this.commands.open || document.querySelector('dialog[open]') || this.editor.querySelector('edgeless-auto-complete-panel'))return;
     if(modified && key==='s') {event.preventDefault();event.stopImmediatePropagation();this.save();return;}
+    if(isTextInput(event) && !event.composedPath().includes(this.editor))return;
     const selected=this.service.selection.selectedElements;
     const mindmapNode=selected.length===1 && selected[0] instanceof ShapeElementModel && selected[0].group instanceof MindmapElementModel?selected[0]:undefined;
     if(mindmapNode && !event.isComposing && (event.key==='Tab' || (event.key==='Enter' && !event.shiftKey))) {
@@ -186,8 +192,12 @@ export class CanvasTools {
   }
 
   private render() {
-    document.getElementById('tools-toggle')!.querySelector('svg')?.remove();
-    document.getElementById('tools-toggle')!.insertAdjacentHTML('afterbegin',icon(this.active));
+    const quick=document.getElementById('tools-quick')!;
+    const definition=definitions.find(([name])=>name===this.lastTool)!;
+    quick.innerHTML=icon(this.lastTool);
+    quick.setAttribute('aria-label',`Use ${definition[1]}`);
+    quick.setAttribute('title',`${definition[1]} (${definition[2]})`);
+    quick.setAttribute('aria-pressed',String(this.active===this.lastTool));
     document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.tool===this.active || (this.active==='triangle' && button.dataset.tool==='box'))));
     document.getElementById('lock-tool')!.setAttribute('aria-pressed',String(this.locked));
     const selected=this.service.selection.selectedElements;

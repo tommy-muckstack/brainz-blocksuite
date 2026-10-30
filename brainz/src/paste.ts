@@ -2,25 +2,70 @@ import type { EdgelessEditor } from '@blocksuite/presets';
 import type { EdgelessRootService } from '@blocksuite/blocks';
 import { bytesToBase64, supportedLink, type LinkReference } from './model';
 import { isTextInput } from './tools';
+import lz from 'lz-string';
 
 export function installPaste(editor: EdgelessEditor, service: EdgelessRootService, addFile: (reference:LinkReference,position:[number,number])=>Promise<void>, addLink:(reference:LinkReference,position?:[number,number])=>unknown, notice:(message:string)=>void) {
+  const clipboard=editor.std.clipboard;
+  const write=clipboard.writeToClipboard.bind(clipboard);
+  let pendingCopy:Promise<void>|undefined;
+  const copies=new Map<string,{resolve:()=>void;reject:(error:Error)=>void}>();
+  window.addEventListener('brainz',event=>{
+    const message=(event as CustomEvent).detail;
+    if(message.type!=='objectsCopied')return;
+    const copy=copies.get(message.requestId);if(!copy)return;
+    copies.delete(message.requestId);
+    if(message.error)copy.reject(new Error(message.error));else copy.resolve();
+  });
+  let copyingObjects=false;
+  for(const type of ['copy','cut'])document.addEventListener(type,event=>{
+    copyingObjects=service.selection.selectedIds.length>0 && !service.selection.editing && !isTextInput(event);
+    // WebKit drains microtasks between DOM listeners; keep the context until
+    // BlockSuite's bubbling copy/cut handler has started the write.
+    setTimeout(()=>{copyingObjects=false;},0);
+  },true);
+  clipboard.writeToClipboard=updateItems=>{
+    if(!copyingObjects)return write(updateItems);
+    const html=Promise.resolve(updateItems({'text/plain':'','text/html':'','image/png':''})).then(items=>{
+      const snapshot={...items};
+      const content=snapshot['text/html'];
+      delete snapshot['text/plain'];delete snapshot['text/html'];delete snapshot['image/png'];
+      return new Blob([`<div data-blocksuite-snapshot='${lz.compressToEncodedURIComponent(JSON.stringify(snapshot))}'>${content ?? ''}</div>`],{type:'text/html'});
+    });
+    // WebKit requires clipboard.write during the user gesture, before any
+    // asynchronous snapshot or image serialization yields control.
+    const operation=window.ipc?html.then(async blob=>{
+      const content=await blob.text();
+      const requestId=crypto.randomUUID();
+      await new Promise<void>((resolve,reject)=>{
+        const timer=setTimeout(()=>{copies.delete(requestId);reject(new Error('The native clipboard did not respond.'));},5000);
+        copies.set(requestId,{resolve:()=>{clearTimeout(timer);resolve();},reject:error=>{clearTimeout(timer);reject(error);}});
+        window.ipc!.postMessage(JSON.stringify({type:'copyObjects',requestId,html:content}));
+      });
+    }):navigator.clipboard.write([new ClipboardItem({'text/html':html})]);
+    pendingCopy=operation;
+    return operation.catch(error=>{
+      notice(`Could not copy canvas objects: ${String(error)}`);
+      throw error;
+    }).finally(()=>{if(pendingCopy===operation)pendingCopy=undefined;});
+  };
   let cursor:[number,number]|undefined;
-  let keyboardPaste: ReturnType<typeof setTimeout>|undefined;
   const nativePaste=()=>{
     if (!window.ipc) return;
-    window.ipc.postMessage(JSON.stringify({type:'pasteClipboard',position:cursor ?? [service.viewport.centerX-140,service.viewport.centerY-100]}));
+    const position=cursor ?? [service.viewport.centerX-140,service.viewport.centerY-100];
+    void Promise.resolve(pendingCopy).then(()=>window.ipc!.postMessage(JSON.stringify({type:'pasteClipboard',position}))).catch(error=>notice(`Could not paste canvas objects: ${String(error)}`));
   };
   editor.addEventListener('pointermove',event=>{cursor=service.viewport.toModelCoordFromClientCoord([event.clientX,event.clientY]);});
-  // WKWebView sometimes omits the paste event when its clipboard contains only an image.
+  // WKWebView can omit paste events on the non-editable canvas. Read the
+  // system clipboard through the host instead, including object metadata.
   document.addEventListener('keydown',event=>{
-    if (!window.ipc || event.key.toLowerCase()!=='v' || !(event.metaKey || event.ctrlKey) || isTextInput(event)) return;
-    if (keyboardPaste) clearTimeout(keyboardPaste);
-    keyboardPaste=setTimeout(()=>{keyboardPaste=undefined;nativePaste();},80);
+    if (!window.ipc || event.key.toLowerCase()!=='v' || !(event.metaKey || event.ctrlKey) || isTextInput(event) || service.selection.editing) return;
+    event.preventDefault();event.stopImmediatePropagation();nativePaste();
   },true);
   document.addEventListener('paste',event=>{
-    if (keyboardPaste) {clearTimeout(keyboardPaste);keyboardPaste=undefined;}
     const insideEditor=event.composedPath().includes(editor);
     if(isTextInput(event) && !insideEditor)return;
+    // Object snapshots take precedence over image previews on the clipboard.
+    if(event.clipboardData?.getData('text/html').includes('data-blocksuite-snapshot')) return;
     const files=Array.from(event.clipboardData?.files ?? []);
     for(const item of files.length ? [] : Array.from(event.clipboardData?.items ?? [])) {
       if (item.kind==='file' && item.type.startsWith('image/')) {
@@ -43,13 +88,10 @@ export function installPaste(editor: EdgelessEditor, service: EdgelessRootServic
       })();
       return;
     }
-    // BlockSuite puts selected canvas objects in an HTML snapshot. Let its
-    // clipboard controller deserialize that snapshot instead of treating the
-    // missing plain text as an image-only WebView paste.
-    if(event.clipboardData?.getData('text/html').includes('data-blocksuite-snapshot')) return;
     if(isTextInput(event))return;
     const value=event.clipboardData?.getData('text/plain').trim();
-    if(value && supportedLink(value)) {event.preventDefault();event.stopImmediatePropagation();const url=new URL(value);addLink({title:decodeURIComponent(url.pathname.split('/').pop() || url.hostname),url:value},cursor);}
+    if(value==='Brainz canvas objects' && window.ipc && !event.clipboardData?.getData('application/x-brainz-native-text')) {event.preventDefault();event.stopImmediatePropagation();nativePaste();}
+    else if(value && supportedLink(value)) {event.preventDefault();event.stopImmediatePropagation();const url=new URL(value);addLink({title:decodeURIComponent(url.pathname.split('/').pop() || url.hostname),url:value},cursor);}
     else if(files.length) {
       event.preventDefault();event.stopImmediatePropagation();
       if (window.ipc && files.some(file=>file.type.startsWith('image/'))) nativePaste();

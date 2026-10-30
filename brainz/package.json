@@ -22,6 +22,7 @@
     "@blocksuite/store": "0.19.5",
     "@toeverything/theme": "1.1.23",
     "lit": "3.3.1",
+    "lz-string": "1.5.0",
     "yjs": "13.6.27"
   },
   "devDependencies": {
