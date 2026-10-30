@@ -4,7 +4,12 @@
 * { box-sizing:border-box; }
 html,body { margin:0; height:100%; background:#141413; }
 body { overflow:hidden; }
-#note { position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; }
+#note { position:absolute; inset:0; overflow:hidden; }
+page-editor { display:block; height:100%; }
+#note .affine-page-viewport { display:block; }
+/* The engine hit-tests these bounds. A fixed viewport-height root leaves
+   overflowing paragraphs visible but unable to receive mouse input. */
+#note editor-host, #note affine-page-root, #note .affine-page-root-block-container { height:auto!important; min-height:100%; }
 /* Markdown has no separate page title, so the doc title stays out of sight. */
 doc-title,.doc-title-container { display:none!important; }
 page-editor,.affine-page-viewport { background:#141413!important; }
@@ -40,7 +45,7 @@ affine-database-title { display:none!important; }
 .backlinks { max-width:760px; margin:0 auto; padding:24px 48px 40vh; border-top:1px solid #2c2c27; }
 /* With a backlinks list under the note, the room to scroll past the end moves below it. */
 body.has-backlinks .affine-page-root-block-container { padding-bottom:32px!important; }
-body.has-backlinks page-editor, body.has-backlinks .affine-page-viewport { min-height:0!important; height:auto!important; }
+body.has-backlinks editor-host, body.has-backlinks affine-page-root, body.has-backlinks .affine-page-root-block-container { min-height:0!important; }
 .backlinks h2 { margin:0 0 10px; color:#99988e; font:600 12px/1.4 'Brainz Canvas',Gellix,sans-serif; text-transform:uppercase; letter-spacing:.06em; }
 .backlink { display:block; width:100%; margin:0 0 6px; padding:10px 12px; border:1px solid #2c2c27; border-radius:10px; background:#1b1b19; color:#e5e3da; text-align:left; font:inherit; cursor:pointer; }
 .backlink:hover { border-color:#e2c76b66; }

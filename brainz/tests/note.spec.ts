@@ -99,6 +99,63 @@ test('note text keeps an I-beam cursor while selecting and controls keep their p
   await expect(page.locator('.source-toggle')).toHaveCSS('cursor', 'pointer');
 });
 
+for (const withBacklinks of [false, true]) {
+  test(`the end of a long note accepts mouse selection and typing${withBacklinks ? ' with backlinks' : ''}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1100, height: 400 });
+    await open(page);
+    const source = Array.from({ length: 35 }, (_, index) => `Paragraph ${index} with selectable words`).join('\n\n') + '\n';
+    await roundTrip(page, source);
+    if (withBacklinks) await page.evaluate(() => window.brainzNote!.receive({ type: 'backlinks', items: [{ path: 'other.md', title: 'Other note', snippet: 'A reference' }] }));
+    const last = page.getByText('Paragraph 34 with selectable words', { exact: true });
+    await last.scrollIntoViewIfNeeded();
+    const box = (await last.boundingBox())!;
+    await page.mouse.move(box.x + 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain('selectable');
+    await page.keyboard.type('Edited at the bottom');
+    const render = () => page.evaluate(() => (window.__brainzNote as NoteHarness).render());
+    await expect.poll(render).toContain('Edited at the bottom');
+    await expect.poll(render).toContain('Paragraph 0 with selectable words');
+    await expect(page.locator('#note')).toHaveJSProperty('scrollTop', 0);
+    if (withBacklinks) {
+      await page.locator('.backlink').scrollIntoViewIfNeeded();
+      await expect(page.locator('.backlink')).toBeInViewport();
+      expect(await render()).not.toContain('A reference');
+    }
+  });
+}
+
+test('paragraph grips reorder blocks, save the order, and support undo', async ({ page }) => {
+  await open(page);
+  const source = 'First paragraph\n\nSecond paragraph\n\nThird paragraph\n';
+  await roundTrip(page, source);
+  await page.getByText('First paragraph', { exact: true }).hover();
+  const grip = page.locator('.affine-drag-handle-container');
+  await expect(grip).toBeVisible();
+  await expect(page.locator('.affine-drag-handle-grabber')).toHaveCSS('width', '12px');
+  const third = page.locator('affine-paragraph').last();
+  const box = (await third.boundingBox())!;
+  await grip.hover();
+  await page.mouse.down();
+  await page.mouse.move(box.x + 50, box.y + box.height - 2, { steps: 15 });
+  // The engine computes the drop position on the next animation frame.
+  await expect.poll(() => page.evaluate(() => (document.querySelector('affine-drag-handle-widget') as unknown as { dropType: string }).dropType)).toBe('after');
+  await page.mouse.move(box.x + 50, box.y + box.height - 1);
+  await page.mouse.up();
+  const render = () => page.evaluate(() => (window.__brainzNote as NoteHarness).render());
+  await expect.poll(render).toBe('Second paragraph\n\nThird paragraph\n\nFirst paragraph\n');
+  await page.locator('editor-host').focus();
+  await page.keyboard.press('Meta+z');
+  await expect.poll(render).toBe(source);
+  await page.keyboard.press('Meta+Shift+z');
+  const moved = 'Second paragraph\n\nThird paragraph\n\nFirst paragraph\n';
+  await expect.poll(render).toBe(moved);
+  expect(await roundTrip(page, moved)).toBe(moved);
+  await expect(page.locator('affine-paragraph').first()).toContainText('Second paragraph');
+});
+
 test('dollar amounts stay text, before and after an edit', async ({ page }) => {
   await open(page);
   const source = '# Plan\n\nPaid $1,524.68 today: $1,434.99 subtotal.\n\nSecond paragraph.\n';

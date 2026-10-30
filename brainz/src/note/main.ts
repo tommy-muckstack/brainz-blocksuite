@@ -1,15 +1,16 @@
 import { effects as presetEffects } from '@blocksuite/presets/effects';
 import { effects as blockEffects } from '@blocksuite/blocks/effects';
 import { PageEditor } from '@blocksuite/presets';
-import { AffineSchemas, AffineSlashMenuWidget, MarkdownAdapter, ThemeProvider } from '@blocksuite/blocks';
+import { AffineDragHandleWidget, AffineSchemas, AffineSlashMenuWidget, MarkdownAdapter, ThemeProvider } from '@blocksuite/blocks';
 import { DocCollection, Job, Schema, Text, type BlockModel, type Doc } from '@blocksuite/store';
 import { ColorScheme, FontFamily } from '@blocksuite/affine-model';
-import { FontConfigExtension, FontLoaderService } from '@blocksuite/affine-shared/services';
+import { DocModeExtension, DocModeService, FontConfigExtension, FontLoaderService } from '@blocksuite/affine-shared/services';
 import { LinkedDocIcon } from '@blocksuite/affine-components/icons';
 import { ConfigExtension } from '@blocksuite/block-std';
 import type { InlineEditor } from '@blocksuite/inline';
 import { combinedDarkCssVariables } from '@toeverything/theme';
 import * as Y from 'yjs';
+import { css } from 'lit';
 import { assemble, isContent, type Segment, type TopBlock } from './segments';
 import { splitMarkdown } from './split';
 import './note.css';
@@ -39,6 +40,20 @@ declare global {
     __brainzNote?: unknown;
   }
 }
+
+// The handle lives in a shadow root, so page CSS cannot style its grip.
+AffineDragHandleWidget.styles = css`
+  ${AffineDragHandleWidget.styles}
+  .affine-drag-handle-grabber {
+    width:12px!important;
+    border-radius:0!important;
+    background:radial-gradient(circle, #99988e 1.4px, transparent 1.6px) 0 0 / 6px 6px;
+  }
+  .affine-drag-handle-container:hover .affine-drag-handle-grabber {
+    background-image:radial-gradient(circle, #e2c76b 1.4px, transparent 1.6px);
+  }
+  .affine-drag-handle-container:active { cursor:grabbing; }
+`;
 
 blockEffects();
 presetEffects();
@@ -145,6 +160,11 @@ function insertNoteLink(inlineEditor: InlineEditor, note: NoteEntry) {
 const collection = new DocCollection({ id: 'brainz-note', schema: new Schema().register(AffineSchemas) });
 collection.meta.initialize();
 const editor = new PageEditor();
+// Standalone PageEditor leaves the current mode unset. The drag-handle and
+// drop-position services require page mode, even when there is no mode toggle.
+class NoteModeService extends DocModeService {
+  override getEditorMode() { return 'page' as const; }
+}
 // "[[" lists the brain's notes and inserts a Markdown link to the one picked.
 const notesMenu = ConfigExtension('affine:page', {
   linkedWidget: {
@@ -163,7 +183,7 @@ const notesMenu = ConfigExtension('affine:page', {
     }]),
   },
 });
-editor.specs = [...editor.specs, notesMenu, FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal', 'italic'].flatMap(style => ['300', '400', '500', '600', '700'].map(weight => ({ font, style, weight, url: `fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf` })))))];
+editor.specs = [...editor.specs, DocModeExtension(new NoteModeService()), notesMenu, FontConfigExtension(Object.values(FontFamily).flatMap(font => ['normal', 'italic'].flatMap(style => ['300', '400', '500', '600', '700'].map(weight => ({ font, style, weight, url: `fonts/Brainz-${style === 'italic' ? 'Italic' : 'Regular'}.ttf` })))))];
 
 interface Loaded {
   doc: Doc;
@@ -399,7 +419,7 @@ async function load(path: string, readOnly: boolean, segments: Segment[]) {
   const token = ++generation;
   // Another note's backlinks must not linger; Brainz sends this note's next.
   if (document.title !== (path.split('/').pop() || 'Note')) renderBacklinks([]);
-  const scroll = host.scrollTop;
+  const scroll = editor.querySelector('.affine-page-viewport')?.scrollTop ?? 0;
   const hadFocus = host.contains(document.activeElement);
   const doc = collection.createDoc({ id: `note-${token}` });
   doc.load();
@@ -436,12 +456,19 @@ async function load(path: string, readOnly: boolean, segments: Segment[]) {
   await editor.updateComplete;
   await editor.std.get(FontLoaderService).ready;
   editor.std.get(ThemeProvider).app$.value = ColorScheme.Dark;
-  host.scrollTop = scroll;
+  const viewport = editor.querySelector('.affine-page-viewport');
+  if (viewport) {
+    viewport.append(backlinks);
+    viewport.scrollTop = scroll;
+  }
   // The editor normalises some blocks as it mounts (an unknown code
   // language resets, for one); only changes after that are edits.
   await new Promise(requestAnimationFrame);
   await new Promise(requestAnimationFrame);
   if (token !== generation) return;
+  const grip = editor.querySelector('affine-drag-handle-widget')?.shadowRoot?.querySelector('.affine-drag-handle-container');
+  grip?.setAttribute('title', 'Drag to move this block');
+  grip?.setAttribute('aria-label', 'Drag to move this block');
   doc.slots.blockUpdated.on(event => {
     if (token !== generation) return;
     markChanged(state, event.id, event.type === 'delete' ? event.parent : undefined);
@@ -535,7 +562,7 @@ function renderBacklinks(items: Backlink[]) {
     row.addEventListener('click', () => post({ type: 'open', href: relativeLink(notePath, item.path) }));
     backlinks.append(row);
   }
-  if (!backlinks.isConnected) host.append(backlinks);
+  editor.querySelector('.affine-page-viewport')?.append(backlinks);
 }
 
 // Selected text gets a Claude menu. Brainz hands the passage and the chosen
