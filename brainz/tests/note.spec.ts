@@ -66,12 +66,47 @@ test('navigation keys delivered as text never reach the note', async ({ page }) 
   expect(output).toBe(source.replace('Second paragraph.', 'Second paragraph. Still typing.'));
 });
 
+for (const [shortcut, expected] of [['Meta+b', '**Words**'], ['Meta+i', '*Words*'], ['Meta+e', '`Words`'], ['Meta+Shift+s', '~~Words~~']]) {
+  test(`standard formatting ${shortcut} and undo edit the selected note text`, async ({ page }) => {
+    await open(page);
+    const render = () => page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render());
+    await roundTrip(page, 'Words\n');
+    await clickEnd(page, 'Words');
+    await page.keyboard.press('Meta+Shift+ArrowLeft');
+    await expect.poll(() => page.evaluate(() => (window.__brainzNote as { editor: { std: { selection: { find(type: string): { from: { length: number } } | undefined } } } }).editor.std.selection.find('text')?.from.length)).toBe(5);
+    await page.keyboard.press(shortcut);
+    await expect.poll(render).toContain(expected);
+    await page.keyboard.press('Meta+z');
+    await expect.poll(render).toBe('Words\n');
+    await page.keyboard.press('Meta+Shift+z');
+    await expect.poll(render).toContain(expected);
+  });
+}
+
+test('note text keeps an I-beam cursor while selecting and controls keep their pointer', async ({ page }) => {
+  await open(page);
+  await roundTrip(page, 'Select these words\n');
+  const text = page.getByText('Select these words', { exact: true });
+  await text.hover();
+  await expect(text).toHaveCSS('cursor', 'text');
+  const box = (await text.boundingBox())!;
+  await page.mouse.move(box.x + 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 8 });
+  await expect(text).toHaveCSS('cursor', 'text');
+  await page.mouse.up();
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain('these');
+  await expect(page.locator('.source-toggle')).toHaveCSS('cursor', 'pointer');
+});
+
 test('dollar amounts stay text, before and after an edit', async ({ page }) => {
   await open(page);
   const source = '# Plan\n\nPaid $1,524.68 today: $1,434.99 subtotal.\n\nSecond paragraph.\n';
   expect(await roundTrip(page, source)).toBe(source);
   await expect(page.getByText('Paid $1,524.68 today: $1,434.99 subtotal.', { exact: true })).toBeVisible();
   await clickEnd(page, 'Paid $1,524.68 today: $1,434.99 subtotal.');
+  // WebKit can resolve the right-edge click before the final punctuation.
+  await page.keyboard.press('Meta+ArrowRight');
   await page.keyboard.type(' Done.');
   const output = await page.evaluate(() => (window as unknown as { __brainzNote: NoteHarness }).__brainzNote.render());
   expect(output).toBe(source.replace('subtotal.', 'subtotal. Done.'));
@@ -122,6 +157,19 @@ async function openWithIpc(page: Page, markdown: string) {
 }
 const sent = (page: Page) => page.evaluate(() => (window as unknown as { __sent: Sent[] }).__sent);
 const lastSave = async (page: Page) => (await sent(page)).filter(message => message.type === 'save').at(-1);
+
+test('Copy path asks Brainz for the current file path and confirms only after copying', async ({ page }) => {
+  await openWithIpc(page, 'A note\n');
+  const button = page.getByRole('button', { name: 'Copy path', exact: true });
+  await button.click();
+  await expect.poll(async () => (await sent(page)).filter(message => message.type === 'copyPath').length).toBe(1);
+  await expect(button).toHaveText('Copy path');
+  await page.evaluate(() => window.brainzNote!.receive({ type: 'pathCopied' }));
+  await expect(page.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
+  await expect(button).toBeVisible();
+  expect((await sent(page)).some(message => message.type === 'save')).toBe(false);
+  await page.screenshot({ path: test.info().outputPath('note-toolbar.png') });
+});
 
 test('splitting a paragraph saves one new block between untouched neighbours', async ({ page }) => {
   const source = 'Alpha  keeps   spacing\n\nBeta\n\n* Gamma\n';
