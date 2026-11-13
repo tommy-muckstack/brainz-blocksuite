@@ -14,7 +14,7 @@ import * as Y from 'yjs';
 import { base64ToBytes, boardLink, bytesToBase64, supportedLink, type BoardDocument, type BoardTarget, type ImageAsset, type LinkReference } from './model';
 import './style.css';
 import { installCapture, installSelectionCapture, renderCapture } from './capture';
-import { CanvasNoteTool, CanvasSelectTool, CanvasTextTool, createNote } from './interactions';
+import { CanvasNoteTool, CanvasSelectTool, CanvasTextTool, createNote, installDoubleClickEdit } from './interactions';
 import { describeScene } from './scene';
 import { CanvasConnectionOverlay, CanvasEditPropsStore, CanvasSnapManager } from './canvas-overrides';
 import { CanvasAgent, type PreparedImage } from './canvas-agent';
@@ -326,6 +326,7 @@ async function load(document: BoardDocument | null, next: BoardTarget) {
     const reference = links.get(id);
     if (reference) { event.preventDefault(); event.stopImmediatePropagation(); post({type:'open',url:reference.url}); }
   },true);
+  installDoubleClickEdit(editor);
   installCapture(editor,service,png=>post({type:'copyImage',png}),notice);
   installSelectionCapture(editor,service,png=>post({type:'copyImage',png}),notice);
   if (agentEnabled) {

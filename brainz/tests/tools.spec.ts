@@ -17,7 +17,7 @@ async function open(page:Page,expandTools=true) {
   if(expandTools) await page.locator('#tools-toggle').click();
 }
 
-test('Drawing tools expand on hover and shortcut labels appear only for the hovered tool',async({page})=>{
+test('Drawing tools expand on hover and name only the hovered tool, with no shortcut keys',async({page})=>{
   await open(page,false);
   const tray=page.locator('.tools');
   await expect(tray).not.toHaveClass(/expanded/);
@@ -26,7 +26,7 @@ test('Drawing tools expand on hover and shortcut labels appear only for the hove
   await expect(tray).toHaveClass(/expanded/);
   await page.getByRole('button',{name:'Pan',exact:true}).hover();
   await expect(page.getByRole('button',{name:'Pan',exact:true}).locator('.tooltip')).toBeVisible();
-  await expect(page.getByRole('button',{name:'Pan',exact:true}).locator('.tooltip kbd')).toHaveText('H');
+  await expect(page.locator('.tools kbd')).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Select',exact:true}).locator('.tooltip')).toBeHidden();
   await expect.poll(()=>page.locator('.tools').evaluate(element=>Math.round(element.getBoundingClientRect().height))).toBe(515);
   await page.screenshot({path:test.info().outputPath('drawing-tools-expanded.png')});
@@ -72,7 +72,7 @@ test('Typing in a text object keeps every character in that object',async({page}
 
 test('Native copy keeps connected objects intact when pasted into another document',async({page})=>{
   await open(page);
-  await page.keyboard.press('r');await page.mouse.move(300,240);await page.mouse.down();await page.mouse.move(490,360,{steps:8});await page.mouse.up();await page.keyboard.type('Start');await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'Box',exact:true}).click();await page.mouse.move(300,240);await page.mouse.down();await page.mouse.move(490,360,{steps:8});await page.mouse.up();await page.keyboard.type('Start');await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Add connected object right',exact:true}).click();await page.keyboard.type('Next');await page.keyboard.press('Escape');
   await page.keyboard.press('Meta+a');await page.keyboard.press('Meta+c');
   await expect.poll(()=>page.evaluate(()=>localStorage.getItem('tools-clipboard'))).toContain('data-blocksuite-snapshot');
@@ -94,7 +94,7 @@ test('Native copy keeps connected objects intact when pasted into another docume
 
 test('Paste waits for a pending native copy and repeated paste creates separate objects',async({page})=>{
   await open(page);
-  await page.keyboard.press('r');await page.mouse.move(350,250);await page.mouse.down();await page.mouse.move(510,360,{steps:8});await page.mouse.up();
+  await page.getByRole('button',{name:'Box',exact:true}).click();await page.mouse.move(350,250);await page.mouse.down();await page.mouse.move(510,360,{steps:8});await page.mouse.up();
   await page.evaluate(()=>{
     const ipc=window.ipc!;
     window.ipc={postMessage(value:string){if(JSON.parse(value).type==='copyObjects')setTimeout(()=>ipc.postMessage(value),200);else ipc.postMessage(value);}};
@@ -140,16 +140,34 @@ test('Dragging a box to its neighbor shows a snap cue and still allows pulling t
   await page.mouse.up();
 });
 
-test('Tool shortcuts select every drawing mode; laser trails never change the document',async({page})=>{
+test('Single keys never switch tools or leave stray text; laser trails never change the document',async({page})=>{
   await open(page);
-  for(const [key,button] of [['e','Eraser'],['f','Frame'],['l','Lasso'],['o','Ellipse'],['d','Diamond'],['k','Laser'],['h','Pan'],['p','Draw'],['a','Connector'],['v','Select']]) {
-    await page.keyboard.press(key);await expect(page.getByRole('button',{name:button,exact:true})).toHaveAttribute('aria-pressed','true');
+  for(const key of ['e','f','l','o','d','k','h','p','a','c','n','r','t','m','q','?']) {
+    await page.keyboard.press(key);await expect(page.getByRole('button',{name:'Select',exact:true})).toHaveAttribute('aria-pressed','true');
   }
-  const before=await page.evaluate(()=>localStorage.getItem('tools-board'));
-  await page.keyboard.press('k');await page.mouse.move(350,280);await page.mouse.move(650,420,{steps:30});await page.waitForTimeout(700);
-  expect(await page.evaluate(()=>localStorage.getItem('tools-board'))).toBe(before);
+  await expect(page.locator('.canvas-command-panel')).toBeHidden();
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.length)).toBe(0);
+  // A sticky that was edited leaves the page editable; letters typed afterwards must go nowhere.
+  await page.getByRole('button',{name:'Sticky note',exact:true}).click();await page.mouse.click(330,240);await page.keyboard.type('First');
+  await page.mouse.click(900,650);await page.keyboard.type('cat');
+  await expect(page.getByRole('button',{name:'Select',exact:true})).toHaveAttribute('aria-pressed','true');
+  expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.length)).toBe(1);
+  await expect.poll(()=>page.locator('affine-edgeless-root').innerText()).not.toContain('cat');
+  await expect(page.locator('#save-state')).toHaveText('Saved locally');
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('tools-board')!).data);
+  await page.getByRole('button',{name:'Laser',exact:true}).click();await page.mouse.move(350,280);await page.mouse.move(650,420,{steps:30});await page.waitForTimeout(700);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('tools-board')!).data)).toBe(before);
   await page.keyboard.press('Escape');await expect(page.locator('#canvas-laser')).toBeHidden();
-  await page.keyboard.press('Shift+r');await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.gfx.tool.currentTool$.peek()?.activatedOption?.shapeName)).toBe('triangle');
+});
+
+test('Double-clicking an object opens it for typing, even on its edge while selected',async({page})=>{
+  await open(page);await page.getByRole('button',{name:'Box',exact:true}).click();
+  await page.mouse.move(400,300);await page.mouse.down();await page.mouse.move(560,410,{steps:8});await page.mouse.up();
+  await page.keyboard.press('Escape');await page.mouse.click(900,650);
+  await page.mouse.click(480,302);await page.mouse.dblclick(480,302);
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.selection.editing)).toBe(true);
+  await page.keyboard.type('edge');
+  await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements[0].text?.toString())).toBe('edge');
 });
 
 test('New shapes take typed labels and the searchable palette frames a selection',async({page})=>{
@@ -160,14 +178,14 @@ test('New shapes take typed labels and the searchable palette frames a selection
   await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.find((element:any)=>element.type==='shape')?.text?.toString())).toBe('abc');
   await page.keyboard.press('Escape');await page.keyboard.press('Meta+k');
   await page.getByRole('combobox',{name:'Find a canvas command'}).fill('frm');
-  await expect(page.getByRole('option').first()).toContainText('Frame');await expect(page.getByRole('option').first().locator('kbd')).toHaveText('F');
+  await expect(page.getByRole('option').first()).toContainText('Frame');await expect(page.getByRole('option').first().locator('kbd')).toHaveText('');
   await page.screenshot({path:test.info().outputPath('commands.png')});
   await page.keyboard.press('Enter');await expect(page.getByRole('dialog',{name:'Canvas commands'})).toBeHidden();
   await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.frames.length)).toBe(1);
 });
 
 test('Tab creates evenly spaced stickies while typing and command Enter finishes editing',async({page})=>{
-  await open(page);await page.keyboard.press('n');await page.mouse.click(310,250);
+  await open(page);await page.getByRole('button',{name:'Sticky note',exact:true}).click();await page.mouse.click(310,250);
   await expect.poll(()=>page.evaluate(()=>(window.__brainzBoard as any).service.selection.editing)).toBe(true);
   await page.keyboard.type('one');await page.keyboard.press('Tab');await page.keyboard.type('two');await page.keyboard.press('Tab');await page.keyboard.type('three');
   await page.keyboard.press('Meta+Enter');
@@ -180,7 +198,7 @@ test('Tab creates evenly spaced stickies while typing and command Enter finishes
 });
 
 test('Locking a creation tool keeps it active, and typing in a title never triggers drawing shortcuts',async({page})=>{
-  await open(page);await page.keyboard.press('r');await page.keyboard.press('q');
+  await open(page);await page.getByRole('button',{name:'Box',exact:true}).click();await page.getByRole('button',{name:'Keep tool active'}).click();
   for(const x of [300,620]) {await page.mouse.move(x,240);await page.mouse.down();await page.mouse.move(x+180,350,{steps:8});await page.mouse.up();await expect(page.getByRole('button',{name:'Box',exact:true})).toHaveAttribute('aria-pressed','true');}
   expect(await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').length)).toBe(2);
   await page.getByRole('button',{name:'Keep tool active'}).click();await page.getByRole('button',{name:'Select',exact:true}).click();
@@ -189,7 +207,7 @@ test('Locking a creation tool keeps it active, and typing in a title never trigg
 });
 
 test('A mind map starts with an editable root and keeps Tab child and Enter sibling behavior',async({page})=>{
-  await open(page);await page.keyboard.press('m');await page.keyboard.type('Project');await page.keyboard.press('Tab');await page.keyboard.type('First');await page.keyboard.press('Enter');await page.keyboard.type('Second');await page.keyboard.press('Escape');
+  await open(page);await page.getByRole('button',{name:'Mind map',exact:true}).click();await page.keyboard.type('Project');await page.keyboard.press('Tab');await page.keyboard.type('First');await page.keyboard.press('Enter');await page.keyboard.type('Second');await page.keyboard.press('Escape');
   const labels=await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').map((element:any)=>element.text?.toString()));
   expect(labels).toEqual(expect.arrayContaining(['Project','First','Second']));
 });
@@ -228,7 +246,7 @@ test('A screenshot omitted from the WebView paste event uses the native clipboar
 
 test('Quick-create dots connect new shapes and stickies, focus text, and offer keyboard choices after a drag',async({page})=>{
   await open(page);
-  await page.keyboard.press('n');await page.mouse.click(330,240);await page.keyboard.type('First');await page.keyboard.press('Meta+Enter');
+  await page.getByRole('button',{name:'Sticky note',exact:true}).click();await page.mouse.click(330,240);await page.keyboard.type('First');await page.keyboard.press('Meta+Enter');
   const right=page.getByRole('button',{name:'Add connected object right',exact:true});
   await expect(right).toBeVisible();
   await expect(page.locator('edgeless-auto-complete .edgeless-auto-complete-arrow')).toHaveCount(4);
@@ -248,7 +266,7 @@ test('Quick-create dots connect new shapes and stickies, focus text, and offer k
 });
 
 test('Sticky Auto sizing keeps its bounds, persists explicit sizing, and restores it on reopen',async({page})=>{
-  await open(page);await page.keyboard.press('n');await page.mouse.click(400,280);await page.keyboard.type('A longer sticky note. '.repeat(24));await page.keyboard.press('Meta+Enter');
+  await open(page);await page.getByRole('button',{name:'Sticky note',exact:true}).click();await page.mouse.click(400,280);await page.keyboard.type('A longer sticky note. '.repeat(24));await page.keyboard.press('Meta+Enter');
   const note=page.locator('affine-edgeless-note');
   await expect.poll(()=>note.evaluate(element=>parseFloat(getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size')))).toBeLessThan(28);
   expect(await note.evaluate((element:any)=>JSON.parse(element.model.xywh).slice(2))).toEqual([280,200]);
@@ -258,7 +276,7 @@ test('Sticky Auto sizing keeps its bounds, persists explicit sizing, and restore
   await expect.poll(()=>note.evaluate(element=>getComputedStyle(element).getPropertyValue('--brainz-sticky-font-size'))).toBe('14px');
 });
 
-test('Selection actions use one toolbar and links stay nonmodal; shortcuts and context menu share commands',async({page})=>{
+test('Selection actions use one toolbar and links stay nonmodal; the palette and context menu share commands',async({page})=>{
   await open(page);
   await page.locator('#add-link').click();await page.locator('#link-url').fill('brainz://open?path=%2Fbrain%2FPlan.md');await page.locator('#link-title').fill('Plan');
   expect(await page.locator('#link-dialog').evaluate(element=>element.matches(':modal'))).toBe(false);
@@ -266,7 +284,6 @@ test('Selection actions use one toolbar and links stay nonmodal; shortcuts and c
   await expect(page.locator('.selection-bar')).toHaveCount(0);
   await page.keyboard.press('Meta+k');await page.getByRole('combobox',{name:'Find a canvas command'}).fill('Open linked');await page.keyboard.press('Enter');
   expect(await page.evaluate(()=>(window as any).__messages.some((message:any)=>message.type==='open' && message.url.includes('Plan.md')))).toBe(true);
-  await page.keyboard.press('?');await expect(page.getByRole('dialog',{name:'Canvas shortcuts'})).toBeVisible();await page.keyboard.press('Escape');
   await page.mouse.click(700,550,{button:'right'});await expect(page.locator('.canvas-command-panel')).toHaveAttribute('data-mode','context');
   await page.getByRole('combobox',{name:'Find a canvas command'}).fill('laser');await page.keyboard.press('Enter');await expect(page.locator('#canvas-laser')).toBeVisible();
   await page.keyboard.press('Meta+k');await expect(page.locator('.canvas-command-panel')).toBeVisible();
@@ -274,7 +291,7 @@ test('Selection actions use one toolbar and links stay nonmodal; shortcuts and c
 });
 
 test('Quick-created shapes copy their style, keep original labels, and undo the new shape and connector together',async({page})=>{
-  await open(page);await page.keyboard.press('r');await page.mouse.move(300,240);await page.mouse.down();await page.mouse.move(490,360,{steps:8});await page.mouse.up();await page.keyboard.type('Start');await page.keyboard.press('Escape');
+  await open(page);await page.getByRole('button',{name:'Box',exact:true}).click();await page.mouse.move(300,240);await page.mouse.down();await page.mouse.move(490,360,{steps:8});await page.mouse.up();await page.keyboard.type('Start');await page.keyboard.press('Escape');
   await page.getByRole('button',{name:'Add connected object right',exact:true}).click();await page.keyboard.type('Next');await page.keyboard.press('Escape');
   const shapes=await page.evaluate(()=>(window.__brainzBoard as any).service.edgelessElements.filter((element:any)=>element.type==='shape').map((element:any)=>({id:element.id,text:element.text?.toString(),fill:element.fillColor,font:element.fontFamily})));
   expect(shapes.map((shape:any)=>shape.text)).toEqual(['Start','Next']);expect(shapes[0].id).not.toBe(shapes[1].id);expect(shapes[1].fill).toEqual(shapes[0].fill);expect(shapes[1].font).toBe(shapes[0].font);

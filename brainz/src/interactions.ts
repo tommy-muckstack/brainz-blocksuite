@@ -92,6 +92,41 @@ export function editNote(std: BlockStdScope, note: NoteBlockModel) {
   focusTextBlock(std,note.id,paragraph);
 }
 
+/** The engine counts clicks itself, and misses the second one when the page was
+ * busy or the press landed on the selection frame. Open whatever is under the
+ * pointer on the system's double click, or on two quick presses in one place
+ * where the frame's handles swallow that event. */
+export function installDoubleClickEdit(editor: EdgelessEditor) {
+  const gfx=editor.std.get(GfxControllerIdentifier);
+  // Wait for the engine's own handling, and give up if the person has moved on.
+  let pending:ReturnType<typeof setTimeout>|undefined;
+  const cancel=()=>{clearTimeout(pending);pending=undefined;};
+  window.addEventListener('pointerdown',cancel,true);window.addEventListener('keydown',cancel,true);
+  const open=(clientX:number,clientY:number)=>{
+    cancel();
+    pending=setTimeout(()=>{
+      pending=undefined;
+      if(editor.doc.readonly || gfx.selection.editing)return;
+      const [x,y]=gfx.viewport.toModelCoordFromClientCoord([clientX,clientY]);
+      const element=gfx.getElementInGroup(x,y);
+      if(element instanceof NoteBlockModel)editNote(editor.std,element);
+      else if(element instanceof ShapeElementModel && !(element.group instanceof MindmapElementModel))editShape(editor,element);
+    },0);
+  };
+  editor.addEventListener('dblclick',event=>{open(event.clientX,event.clientY);},true);
+  let previous:{time:number;x:number;y:number}|undefined, second:{x:number;y:number}|undefined;
+  const near=(event:PointerEvent,point:{x:number;y:number})=>Math.hypot(event.clientX-point.x,event.clientY-point.y)<5;
+  editor.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;
+    second=previous && event.timeStamp-previous.time<450 && near(event,previous)?{x:event.clientX,y:event.clientY}:undefined;
+    previous={time:event.timeStamp,x:event.clientX,y:event.clientY};
+  },true);
+  editor.addEventListener('pointerup',event=>{
+    if(second && near(event,second))open(event.clientX,event.clientY);
+    second=undefined;
+  },true);
+}
+
 export class CanvasTextTool extends TextTool {
   override click(event: PointerEventState) {
     const [x,y]=this.gfx.viewport.toModelCoord(event.x,event.y);

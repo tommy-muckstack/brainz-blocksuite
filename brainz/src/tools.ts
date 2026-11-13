@@ -8,10 +8,9 @@ import { createNote, editNote, editShape, keepCreationTool } from './interaction
 import { icon, tool } from './shell';
 
 const definitions = [
-  ['pointer','Select','V'],['hand','Pan','H'],['note','Sticky note','N'],['box','Box','R'],['ellipse','Ellipse','O'],['diamond','Diamond','D'],['triangle','Triangle','⇧R'],['connector','Connector','C'],['text','Text','T'],['pen','Draw','P'],['eraser','Eraser','E'],['frame','Frame','F'],['mindmap','Mind map','M'],['lasso','Lasso','L'],['laser','Laser','K'],
+  ['pointer','Select'],['hand','Pan'],['note','Sticky note'],['box','Box'],['ellipse','Ellipse'],['diamond','Diamond'],['triangle','Triangle'],['connector','Connector'],['text','Text'],['pen','Draw'],['eraser','Eraser'],['frame','Frame'],['mindmap','Mind map'],['lasso','Lasso'],['laser','Laser'],
 ] as const;
 const shapeNames = {box:'roundedRect',ellipse:ShapeType.Ellipse,diamond:ShapeType.Diamond,triangle:ShapeType.Triangle} as const;
-const keys: Record<string,string> = {v:'pointer',h:'hand',n:'note',r:'box',o:'ellipse',d:'diamond',c:'connector',a:'connector',t:'text',p:'pen',e:'eraser',f:'frame',m:'mindmap',l:'lasso',k:'laser'};
 
 export function isTextInput(event: Event) {
   return event.composedPath().some(node=>node instanceof HTMLElement && (node.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(node.tagName)));
@@ -52,7 +51,7 @@ export class CanvasTools {
     toggle.onclick=()=>{this.pinned=!this.pinned;this.ignoreHover=!this.pinned;setExpanded(this.pinned);};
     quick.onclick=()=>this.select(this.lastTool);
     rail.addEventListener('keydown',event=>{if(event.key==='Escape'){this.pinned=false;this.ignoreHover=true;quick.focus();setExpanded(false);}});
-    rail.querySelector('[data-tool="box"]')!.insertAdjacentHTML('afterend',`${tool('ellipse','Ellipse','O')}${tool('diamond','Diamond','D')}`);
+    rail.querySelector('[data-tool="box"]')!.insertAdjacentHTML('afterend',`${tool('ellipse','Ellipse')}${tool('diamond','Diamond')}`);
     rail.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>{
       button.onclick=()=>this.select(button.dataset.tool!);
       const positionTooltip=()=>{
@@ -64,13 +63,12 @@ export class CanvasTools {
     });
     const lock=document.getElementById('lock-tool')!;lock.onclick=()=>this.toggleLock();
     this.commands=new CanvasCommands(()=>[
-      ...definitions.map(([id,label,shortcut])=>({id:`tool-${id}`,label,group:'Tools' as const,keys:shortcut,run:()=>this.select(id)})),
-      {id:'keep-tool',label:this.locked?'Release current tool':'Keep current tool active',group:'Tools',keys:'Q',run:()=>this.toggleLock()},
-      {id:'fit',label:'Fit canvas to content',group:'View',keys:'⇧1',run:()=>service.zoomToFit()},
+      ...definitions.map(([id,label])=>({id:`tool-${id}`,label,group:'Tools' as const,run:()=>this.select(id)})),
+      {id:'keep-tool',label:this.locked?'Release current tool':'Keep current tool active',group:'Tools',run:()=>this.toggleLock()},
+      {id:'fit',label:'Fit canvas to content',group:'View',run:()=>service.zoomToFit()},
       {id:'reset-zoom',label:'Zoom to 100%',group:'View',run:()=>service.viewport.setZoom(1)},
       {id:'undo',label:'Undo',group:'Arrange',keys:'⌘Z',run:()=>editor.doc.undo()},
       {id:'redo',label:'Redo',group:'Arrange',keys:'⇧⌘Z',run:()=>editor.doc.redo()},
-      {id:'shortcuts',label:'Keyboard shortcuts',group:'View',keys:'?',run:()=>this.commands.show('shortcuts')},
       ...extra(),
     ]);
     document.getElementById('commands')!.onclick=()=>this.commands.show();
@@ -172,23 +170,22 @@ export class CanvasTools {
       }
       return;
     }
-    if(isTextInput(event) || this.service.selection.editing)return;
-    if(event.key==='?') {event.preventDefault();event.stopImmediatePropagation();this.commands.show('shortcuts');return;}
+    // A sticky that was edited can leave the page editable, so only real form
+    // fields and an object in edit mode count as typing here.
+    if(event.composedPath().some(node=>node instanceof HTMLElement && ['INPUT','TEXTAREA','SELECT'].includes(node.tagName)) || this.service.selection.editing)return;
     if(event.key==='Escape') {this.select('pointer');return;}
     if(event.key==='Enter' && selected.length===1 && !modified) {
       if(note) {event.preventDefault();event.stopImmediatePropagation();editNote(this.editor.std,note);return;}
       if(selected[0] instanceof ShapeElementModel && !(selected[0].group instanceof MindmapElementModel)) {event.preventDefault();event.stopImmediatePropagation();editShape(this.editor,selected[0]);return;}
     }
     if(modified || event.altKey)return;
-    if(event.shiftKey && event.key==='!') {event.preventDefault();event.stopImmediatePropagation();this.service.zoomToFit();return;}
-    if(event.shiftKey && key==='r') {event.preventDefault();event.stopImmediatePropagation();const shapes=Object.keys(shapeNames);this.select(shapes[(shapes.indexOf(this.previousTool)+1)%shapes.length]);return;}
     // Mind-map labels own printable keys and their Tab/Enter navigation.
     if(selected.length===1 && selected[0].group instanceof MindmapElementModel)return;
-    if(key==='q') {event.preventDefault();event.stopImmediatePropagation();this.toggleLock();return;}
-    if(selected.length===1 && selected[0] instanceof ShapeElementModel && this.active==='pointer' && event.key.length===1 && key!==' ' && key!=='f') {
-      event.preventDefault();event.stopImmediatePropagation();editShape(this.editor,selected[0],event.key);return;
-    }
-    if(keys[key]) {event.preventDefault();event.stopImmediatePropagation();this.select(keys[key]);}
+    if(event.key.length!==1 || key===' ')return;
+    // The canvas has no single-key shortcuts: a letter either starts typing in
+    // the selected shape or does nothing, and never reaches the engine's own.
+    event.preventDefault();event.stopImmediatePropagation();
+    if(selected.length===1 && selected[0] instanceof ShapeElementModel && this.active==='pointer')editShape(this.editor,selected[0],event.key);
   }
 
   private render() {
@@ -196,13 +193,13 @@ export class CanvasTools {
     const definition=definitions.find(([name])=>name===this.lastTool)!;
     quick.innerHTML=icon(this.lastTool);
     quick.setAttribute('aria-label',`Use ${definition[1]}`);
-    quick.setAttribute('title',`${definition[1]} (${definition[2]})`);
+    quick.setAttribute('title',definition[1]);
     quick.setAttribute('aria-pressed',String(this.active===this.lastTool));
     document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.tool===this.active || (this.active==='triangle' && button.dataset.tool==='box'))));
     document.getElementById('lock-tool')!.setAttribute('aria-pressed',String(this.locked));
     const selected=this.service.selection.selectedElements;
     const hint=document.querySelector('.hint')!;
-    hint.textContent=selected.length===1 && selected[0].group instanceof MindmapElementModel?'Tab adds a child · Enter adds a sibling':selected.length===1 && selected[0] instanceof NoteBlockModel && this.service.selection.editing?'Tab: next sticky · ⇧Tab: below · ⌘Enter: finish':this.active==='note'?'Click to place · Tab for the next sticky':this.active==='laser'?'Point to highlight · Escape to finish':this.active==='eraser'?'Drag across objects to erase · ⌘Z to undo':selected.length>1?'F to frame · ⌘G to group · ⌘K for commands':selected.length===1?'Enter to edit · Drag to move · ⌘K for commands':'Space + drag to pan · Pinch to zoom · ? for shortcuts';
+    hint.textContent=selected.length===1 && selected[0].group instanceof MindmapElementModel?'Tab adds a child · Enter adds a sibling':selected.length===1 && selected[0] instanceof NoteBlockModel && this.service.selection.editing?'Tab: next sticky · ⇧Tab: below · ⌘Enter: finish':this.active==='note'?'Click to place · Tab for the next sticky':this.active==='laser'?'Point to highlight · Escape to finish':this.active==='eraser'?'Drag across objects to erase · ⌘Z to undo':selected.length>1?'⌘G to group · ⌘K for commands':selected.length===1?'Enter to edit · Drag to move · ⌘K for commands':'Space + drag to pan · Pinch to zoom · ⌘K for commands';
   }
 
   private installShapeMenu() {
