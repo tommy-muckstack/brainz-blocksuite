@@ -59,9 +59,12 @@ export function installPaste(editor: EdgelessEditor, service: EdgelessRootServic
   // system clipboard through the host instead, including object metadata.
   document.addEventListener('keydown',event=>{
     if (!window.ipc || event.key.toLowerCase()!=='v' || !(event.metaKey || event.ctrlKey) || isTextInput(event) || service.selection.editing) return;
-    event.preventDefault();event.stopImmediatePropagation();nativePaste();
+    event.preventDefault();event.stopImmediatePropagation();keyPasteAt=Date.now();nativePaste();
   },true);
+  // Brainz also sends a native paste after the key; this keydown already pasted.
+  let keyPasteAt=0;
   document.addEventListener('paste',event=>{
+    if(Date.now()-keyPasteAt<1000 && !isTextInput(event) && !service.selection.editing){keyPasteAt=0;event.preventDefault();event.stopImmediatePropagation();return;}
     const insideEditor=event.composedPath().includes(editor);
     if(isTextInput(event) && !insideEditor)return;
     // Object snapshots take precedence over image previews on the clipboard.
